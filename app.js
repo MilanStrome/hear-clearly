@@ -522,7 +522,10 @@
   var gearBtn = document.getElementById("btn-gear");
   var holdTimer = null;
   var HOLD_MS = 1200;
-  function startHold(){
+  function startHold(e){
+    // Capture the pointer so a long-press on Android can't cancel the hold
+    // via the browser's context-menu/selection gestures.
+    try{ gearBtn.setPointerCapture(e.pointerId); }catch(err){}
     gearBtn.classList.add("filling");
     gearBtn.querySelector(".fill").style.transitionDuration = HOLD_MS + "ms";
     holdTimer = setTimeout(function(){ openSetup(); cancelHold(false); }, HOLD_MS);
@@ -536,7 +539,9 @@
   }
   gearBtn.addEventListener("pointerdown", startHold);
   gearBtn.addEventListener("pointerup", function(){ cancelHold(true); });
+  gearBtn.addEventListener("pointercancel", function(){ cancelHold(true); });
   gearBtn.addEventListener("pointerleave", function(){ cancelHold(true); });
+  gearBtn.addEventListener("contextmenu", function(e){ e.preventDefault(); });
 
   function openSetup(){
     document.getElementById("setup-boost").value = settings.boost;
@@ -599,6 +604,7 @@
     var size = (box.className.match(/cap-size-\d/) || [""])[0];
     lc.className = "lock-captions " + size;
     lc.innerHTML = box.innerHTML;
+    lc.querySelectorAll("[id]").forEach(function(n){ n.removeAttribute("id"); });
     lc.scrollTop = lc.scrollHeight;
   }
 
@@ -624,7 +630,14 @@
   document.getElementById("btn-lock").addEventListener("click", lockScreen);
 
   var unlockBtn = document.getElementById("btn-unlock");
-  function startUnlockHold(){
+  function showLockHint(){
+    var hint = document.getElementById("lock-hint");
+    hint.classList.add("show");
+    if(lockHintTimer) clearTimeout(lockHintTimer);
+    lockHintTimer = setTimeout(function(){ hint.classList.remove("show"); }, 1600);
+  }
+  function startUnlockHold(e){
+    try{ unlockBtn.setPointerCapture(e.pointerId); }catch(err){}
     unlockBtn.classList.add("filling");
     unlockBtn.querySelector(".fill").style.transitionDuration = HOLD_MS + "ms";
     unlockTimer = setTimeout(function(){ unlockScreen(); }, HOLD_MS);
@@ -637,16 +650,19 @@
     }
   }
   unlockBtn.addEventListener("pointerdown", startUnlockHold);
-  unlockBtn.addEventListener("pointerup", function(){ cancelUnlockHold(true); });
+  unlockBtn.addEventListener("pointerup", function(){
+    // Released too early — still locked, so remind them how it works.
+    if(unlockTimer) showLockHint();
+    cancelUnlockHold(true);
+  });
+  unlockBtn.addEventListener("pointercancel", function(){ cancelUnlockHold(true); });
   unlockBtn.addEventListener("pointerleave", function(){ cancelUnlockHold(true); });
+  unlockBtn.addEventListener("contextmenu", function(e){ e.preventDefault(); });
 
   // A stray tap anywhere on the lock screen just shows the how-to-unlock hint.
   document.getElementById("lock-overlay").addEventListener("click", function(e){
     if(e.target.closest("#btn-unlock") || e.target.closest("#btn-emergency-lock")) return;
-    var hint = document.getElementById("lock-hint");
-    hint.classList.add("show");
-    if(lockHintTimer) clearTimeout(lockHintTimer);
-    lockHintTimer = setTimeout(function(){ hint.classList.remove("show"); }, 1600);
+    showLockHint();
   });
 
   /* ---------------- emergency ---------------- */
