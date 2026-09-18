@@ -1,7 +1,7 @@
 (function(){
   "use strict";
 
-  var APP_VERSION = "5.4"; // keep in step with CACHE_VERSION in sw.js
+  var APP_VERSION = "5.6"; // keep in step with CACHE_VERSION in sw.js
   console.log("Hear Clearly app.js version " + APP_VERSION);
 
   /* ---------------- state & storage ---------------- */
@@ -68,11 +68,10 @@
   }
   currentSettingsIntoUI();
 
-  // Raw microphone: echo cancellation would try to cancel our own boosted
-  // output (garbled "underwater" sound), and auto gain control pumps the
-  // volume up and down. Both are call-oriented processing, wrong for a
-  // hearing-assist monitor.
-  var MIC_CONSTRAINTS = {echoCancellation:false, noiseSuppression:false, autoGainControl:false};
+  // Echo cancellation stays off: it tries to cancel our own boosted output
+  // (garbled "underwater" sound). Auto gain control stays ON — without it,
+  // many Android mics capture at near-zero level or go fully silent.
+  var MIC_CONSTRAINTS = {echoCancellation:false, noiseSuppression:false, autoGainControl:true};
 
   async function startListening(){
     try{
@@ -128,6 +127,46 @@
     beginSession();
     var lb = document.getElementById("btn-lock");
     if(lb) lb.style.display = "flex";
+    watchForSilentMic();
+  }
+
+  /* Some Android devices deliver a silent stream when processing is disabled.
+     Watch the first ~3s of a session: a real mic never flatlines exactly at
+     zero (even a quiet room has noise-floor wobble). If it does, re-request
+     the mic with the browser's default settings and swap it in. */
+  var silenceCheckTimer = null;
+  function watchForSilentMic(){
+    if(silenceCheckTimer) clearTimeout(silenceCheckTimer);
+    var checks = 0, flatlines = 0;
+    var data = new Uint8Array(512);
+    function sample(){
+      if(!isListening || !analyserNode) return;
+      analyserNode.getByteTimeDomainData(data);
+      var maxDev = 0;
+      for(var i=0;i<data.length;i++){
+        var d = Math.abs(data[i] - 128);
+        if(d > maxDev) maxDev = d;
+      }
+      if(maxDev <= 1) flatlines++;
+      checks++;
+      if(checks < 12){ silenceCheckTimer = setTimeout(sample, 250); return; }
+      if(flatlines >= 11) fallbackToDefaultMic();
+    }
+    silenceCheckTimer = setTimeout(sample, 400);
+  }
+
+  async function fallbackToDefaultMic(){
+    if(!isListening) return;
+    try{
+      var basic = await navigator.mediaDevices.getUserMedia({audio:true});
+      if(!isListening){ basic.getTracks().forEach(function(t){ t.stop(); }); return; }
+      if(sourceNode){ try{ sourceNode.disconnect(); }catch(e){} }
+      if(micStream){ micStream.getTracks().forEach(function(t){ t.stop(); }); }
+      micStream = basic;
+      sourceNode = audioCtx.createMediaStreamSource(micStream);
+      sourceNode.connect(gainNode);
+      showToast("Microphone adjusted");
+    }catch(e){ /* keep whatever we have */ }
   }
 
   function stopListening(){
@@ -141,6 +180,7 @@
     stopCaptions();
     releaseWakeLock();
     hideMicWarning();
+    if(silenceCheckTimer){ clearTimeout(silenceCheckTimer); silenceCheckTimer = null; }
     var lb = document.getElementById("btn-lock");
     if(lb) lb.style.display = "none";
     unlockScreen(); // never leave the lock up when listening has ended
@@ -439,15 +479,20 @@
     box.classList.add("cap-size-" + (settings.captionSize || 2));
   }
 
+  var CAPTION_SIZE_NAMES = {1:"Small", 2:"Medium", 3:"Large", 4:"Huge"};
   document.getElementById("btn-caption-size").addEventListener("click", function(){
     settings.captionSize = (Number(settings.captionSize || 2) % 4) + 1;
     applyCaptionSizeToDOM();
     saveSettings();
+    showToast("Text size: " + CAPTION_SIZE_NAMES[settings.captionSize]);
   });
 
   document.getElementById("btn-repeat").addEventListener("click", function(){
     var overlay = document.getElementById("repeat-overlay");
-    var text = lastFinalCaption || "Nothing has been said yet.";
+    var noCaptionMsg = settings.captionsEnabled === false
+      ? "Captions are turned off, so there is nothing to repeat. A family member can turn them on in Setup."
+      : "Nothing has been said yet.";
+    var text = lastFinalCaption || noCaptionMsg;
     overlay.textContent = text;
     overlay.classList.add("show");
     if("speechSynthesis" in window && lastFinalCaption){
@@ -597,7 +642,19 @@
     setSwitch(document.getElementById("setup-captions-switch"), settings.captionsEnabled !== false);
     showView("setup");
   }
-  document.getElementById("btn-back-from-setup").addEventListener("click", function(){ showView("home"); });
+  // Live preview: changing the appearance dropdown applies instantly so the
+  // caregiver sees the effect; leaving without saving restores the saved theme.
+  document.getElementById("setup-theme").addEventListener("change", function(){
+    var v = this.value;
+    var root = document.documentElement;
+    if(v === "light") root.setAttribute("data-theme","light");
+    else if(v === "dark") root.setAttribute("data-theme","dark");
+    else root.removeAttribute("data-theme");
+  });
+  document.getElementById("btn-back-from-setup").addEventListener("click", function(){
+    applyTheme(); // revert any unsaved theme preview
+    showView("home");
+  });
 
   function setSwitch(el, on){
     if(!el) return;
