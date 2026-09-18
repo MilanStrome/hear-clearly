@@ -1,13 +1,14 @@
 (function(){
   "use strict";
 
-  var APP_VERSION = "5.2"; // keep in step with CACHE_VERSION in sw.js
+  var APP_VERSION = "5.4"; // keep in step with CACHE_VERSION in sw.js
   console.log("Hear Clearly app.js version " + APP_VERSION);
 
   /* ---------------- state & storage ---------------- */
   var DEFAULT_SETTINGS = {
     boost: 2, captionSize: 2, theme: "auto", advanced: false,
     emergencyName: "", emergencyPhone: "", showEmergency: true,
+    captionsEnabled: true,
     freq: 2500, boostDb: 9
   };
   var settings = loadJSON("ha_settings", DEFAULT_SETTINGS);
@@ -48,7 +49,7 @@
   });
 
   /* ---------------- audio engine ---------------- */
-  var audioCtx = null, micStream = null, sourceNode = null, gainNode = null, filterNode = null, analyserNode = null;
+  var audioCtx = null, micStream = null, sourceNode = null, gainNode = null, filterNode = null, analyserNode = null, compressorNode = null;
   var isListening = false;
   var noiseRAF = null;
 
@@ -67,9 +68,15 @@
   }
   currentSettingsIntoUI();
 
+  // Raw microphone: echo cancellation would try to cancel our own boosted
+  // output (garbled "underwater" sound), and auto gain control pumps the
+  // volume up and down. Both are call-oriented processing, wrong for a
+  // hearing-assist monitor.
+  var MIC_CONSTRAINTS = {echoCancellation:false, noiseSuppression:false, autoGainControl:false};
+
   async function startListening(){
     try{
-      micStream = await navigator.mediaDevices.getUserMedia({audio:{echoCancellation:true, noiseSuppression:true}});
+      micStream = await navigator.mediaDevices.getUserMedia({audio: MIC_CONSTRAINTS});
     }catch(err){
       alert("This app needs microphone access to work. Please allow microphone access and try again.");
       return;
@@ -92,10 +99,20 @@
     analyserNode = audioCtx.createAnalyser();
     analyserNode.fftSize = 512;
 
+    // Limiter: stops loud speech from clipping into harsh distortion
+    // now that the gain and EQ boost can push peaks past full scale.
+    compressorNode = audioCtx.createDynamicsCompressor();
+    compressorNode.threshold.value = -12;
+    compressorNode.knee.value = 12;
+    compressorNode.ratio.value = 12;
+    compressorNode.attack.value = 0.003;
+    compressorNode.release.value = 0.25;
+
     sourceNode.connect(gainNode);
     gainNode.connect(filterNode);
     filterNode.connect(analyserNode);
-    filterNode.connect(audioCtx.destination);
+    filterNode.connect(compressorNode);
+    compressorNode.connect(audioCtx.destination);
 
     isListening = true;
     showToast("Listening — speak normally");
@@ -129,6 +146,7 @@
     unlockScreen(); // never leave the lock up when listening has ended
     if(micStream){ micStream.getTracks().forEach(function(t){ t.stop(); }); micStream = null; }
     if(audioCtx){ audioCtx.close().catch(function(){}); audioCtx = null; }
+    compressorNode = null;
     document.getElementById("noise-fill").style.width = "0%";
   }
 
@@ -205,7 +223,7 @@
       if(builtIn){
         try{
           var better = await navigator.mediaDevices.getUserMedia({
-            audio:{deviceId:{exact: builtIn.deviceId}, echoCancellation:true, noiseSuppression:true}
+            audio: Object.assign({deviceId:{exact: builtIn.deviceId}}, MIC_CONSTRAINTS)
           });
           stream.getTracks().forEach(function(t){ t.stop(); });
           stream = better;
@@ -284,6 +302,10 @@
   }
 
   function startCaptions(){
+    if(settings.captionsEnabled === false){
+      showCaptionsOff();
+      return;
+    }
     var SR = getSpeechRecognitionClass();
     var box = document.getElementById("caption-box");
     var empty = document.getElementById("caption-empty");
@@ -339,6 +361,16 @@
     box.innerHTML = '<div class="caption-empty">🔌 No internet connection — captions are unavailable right now.<br><br>Your volume boost is still working normally through your headphones.</div>';
   }
 
+  function showCaptionsOff(){
+    var box = document.getElementById("caption-box");
+    box.innerHTML = '<div class="caption-empty">💬 Captions are turned off. Your volume boost is working normally.<br><br>A family member can turn captions back on in Setup.</div>';
+  }
+
+  function resetCaptionBox(){
+    var box = document.getElementById("caption-box");
+    box.innerHTML = '<div class="caption-empty" id="caption-empty">Captions of what\'s said will appear here once you start.</div>';
+  }
+
   function updateNetStatus(){
     var dot = document.getElementById("net-dot");
     var text = document.getElementById("net-text");
@@ -352,9 +384,8 @@
   }
   window.addEventListener("online", function(){
     updateNetStatus();
-    if(isListening && !recognitionActive){
-      var box = document.getElementById("caption-box");
-      box.innerHTML = '<div class="caption-empty" id="caption-empty">Captions of what\'s said will appear here once you start.</div>';
+    if(isListening && !recognitionActive && settings.captionsEnabled !== false){
+      resetCaptionBox();
       startCaptions();
     }
   });
@@ -563,6 +594,7 @@
     document.getElementById("setup-phone").value = settings.emergencyPhone;
     setSwitch(document.getElementById("setup-advanced-switch"), settings.advanced);
     setSwitch(document.getElementById("setup-emergency-switch"), settings.showEmergency !== false);
+    setSwitch(document.getElementById("setup-captions-switch"), settings.captionsEnabled !== false);
     showView("setup");
   }
   document.getElementById("btn-back-from-setup").addEventListener("click", function(){ showView("home"); });
@@ -579,6 +611,10 @@
   if(emSwitch) emSwitch.addEventListener("click", function(){
     setSwitch(this, this.dataset.on !== "1");
   });
+  var capSwitch = document.getElementById("setup-captions-switch");
+  if(capSwitch) capSwitch.addEventListener("click", function(){
+    setSwitch(this, this.dataset.on !== "1");
+  });
 
   document.getElementById("btn-save-setup").addEventListener("click", function(){
     settings.boost = Number(document.getElementById("setup-boost").value);
@@ -589,7 +625,23 @@
     settings.advanced = document.getElementById("setup-advanced-switch").dataset.on === "1";
     var emSw = document.getElementById("setup-emergency-switch");
     if(emSw) settings.showEmergency = emSw.dataset.on === "1";
+    var capSw = document.getElementById("setup-captions-switch");
+    if(capSw) settings.captionsEnabled = capSw.dataset.on === "1";
     saveSettings();
+    // apply the captions choice immediately if a session is running
+    if(isListening){
+      if(settings.captionsEnabled === false){
+        stopCaptions();
+        showCaptionsOff();
+      } else if(!recognitionActive){
+        resetCaptionBox();
+        startCaptions();
+      }
+    } else if(settings.captionsEnabled === false){
+      showCaptionsOff();
+    } else {
+      resetCaptionBox();
+    }
     applyTheme();
     currentSettingsIntoUI();
     updateEmergencyLabel();
