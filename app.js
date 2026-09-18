@@ -1,7 +1,7 @@
 (function(){
   "use strict";
 
-  var APP_VERSION = "5.6"; // keep in step with CACHE_VERSION in sw.js
+  var APP_VERSION = "5.7"; // keep in step with CACHE_VERSION in sw.js
   console.log("Hear Clearly app.js version " + APP_VERSION);
 
   /* ---------------- state & storage ---------------- */
@@ -68,10 +68,28 @@
   }
   currentSettingsIntoUI();
 
-  // Echo cancellation stays off: it tries to cancel our own boosted output
-  // (garbled "underwater" sound). Auto gain control stays ON — without it,
-  // many Android mics capture at near-zero level or go fully silent.
-  var MIC_CONSTRAINTS = {echoCancellation:false, noiseSuppression:false, autoGainControl:true};
+  // These are the settings that reliably produce audible output on Android;
+  // disabling echoCancellation made several devices go fully silent (Chrome
+  // routes the audio differently without it). The clipping side of the old
+  // "blur" is handled by the limiter in the chain instead.
+  var MIC_CONSTRAINTS = {echoCancellation:true, noiseSuppression:true, autoGainControl:true};
+
+  // Android quirk: WebAudio output from a mic stream can stay silent unless
+  // the stream is also attached to a (muted) media element.
+  var keepAliveAudio = null;
+  function attachKeepAlive(stream){
+    try{
+      if(!keepAliveAudio){ keepAliveAudio = new Audio(); keepAliveAudio.muted = true; }
+      keepAliveAudio.srcObject = stream;
+      var p = keepAliveAudio.play();
+      if(p && p.catch) p.catch(function(){});
+    }catch(e){}
+  }
+  function releaseKeepAlive(){
+    try{
+      if(keepAliveAudio){ keepAliveAudio.pause(); keepAliveAudio.srcObject = null; }
+    }catch(e){}
+  }
 
   async function startListening(){
     try{
@@ -81,6 +99,7 @@
       return;
     }
     micStream = await preferBuiltInMic(micStream);
+    attachKeepAlive(micStream);
     var AC = window.AudioContext || window.webkitAudioContext;
     audioCtx = new AC();
     if(audioCtx.state === "suspended"){ try{ await audioCtx.resume(); }catch(e){} }
@@ -163,6 +182,7 @@
       if(sourceNode){ try{ sourceNode.disconnect(); }catch(e){} }
       if(micStream){ micStream.getTracks().forEach(function(t){ t.stop(); }); }
       micStream = basic;
+      attachKeepAlive(micStream);
       sourceNode = audioCtx.createMediaStreamSource(micStream);
       sourceNode.connect(gainNode);
       showToast("Microphone adjusted");
@@ -184,6 +204,7 @@
     var lb = document.getElementById("btn-lock");
     if(lb) lb.style.display = "none";
     unlockScreen(); // never leave the lock up when listening has ended
+    releaseKeepAlive();
     if(micStream){ micStream.getTracks().forEach(function(t){ t.stop(); }); micStream = null; }
     if(audioCtx){ audioCtx.close().catch(function(){}); audioCtx = null; }
     compressorNode = null;
