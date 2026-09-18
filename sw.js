@@ -1,8 +1,8 @@
-/* Hear Clearly — service worker
+/* Hear Clearly - service worker
    Cache-first app shell so the app opens with zero internet connection,
    even from a cold start. Bump CACHE_VERSION when shipping updated files. */
 
-var CACHE_VERSION = "hear-clearly-v6.4";
+var CACHE_VERSION = "hear-clearly-v6.6";
 var SHELL_FILES = [
   "./",
   "index.html",
@@ -19,7 +19,7 @@ self.addEventListener("install", function(event){
   event.waitUntil(
     caches.open(CACHE_VERSION).then(function(cache){
       // "no-cache" bypasses stale HTTP/CDN copies (e.g. GitHub Pages' ~10 min
-      // cache) so the precached shell is a fresh, mutually consistent set —
+      // cache) so the precached shell is a fresh, mutually consistent set -
       // never a mix of old and new files.
       return cache.addAll(SHELL_FILES.map(function(url){
         return new Request(url, {cache: "no-cache"});

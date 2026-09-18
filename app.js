@@ -1,7 +1,7 @@
 (function(){
   "use strict";
 
-  var APP_VERSION = "6.4"; // keep in step with CACHE_VERSION in sw.js
+  var APP_VERSION = "6.6"; // keep in step with CACHE_VERSION in sw.js
   console.log("Hear Clearly app.js version " + APP_VERSION);
 
   /* ---------------- state & storage ---------------- */
@@ -50,7 +50,7 @@
   var audioCtx = null, micStream = null, sourceNode = null, gainNode = null, filterNode = null, analyserNode = null, compressorNode = null;
   var hpfNode = null, gateNode = null, gateAnalyser = null, makeupNode = null, pannerNode = null, clipperNode = null;
 
-  /* "Extra loud mode": hearing-aid style loudness maximizing — the limiter
+  /* "Extra loud mode": hearing-aid style loudness maximizing - the limiter
      bites earlier and the makeup stage pushes peaks near full scale. The
      soft clipper (always in the chain) rounds off anything that would
      exceed the ceiling, so neither mode can crackle. */
@@ -80,7 +80,7 @@
   var noiseRAF = null;
 
   /* Noise gate: ducks the output ~85% when the (pre-boost) level sits at the
-     mic's hiss floor — quiet between sentences — and reopens the instant
+     mic's hiss floor - quiet between sentences - and reopens the instant
      speech starts. Fast open so word starts aren't clipped, slow close so it
      doesn't flutter, and it ducks rather than hard-mutes. */
   var GATE_OPEN_RMS = 0.012, GATE_CLOSE_RMS = 0.006, GATE_CLOSE_HOLD_MS = 400;
@@ -109,7 +109,7 @@
           gateNode.gain.setTargetAtTime(loudParams().gateFloor, audioCtx.currentTime, 0.15);
         }
       }
-      /* between the two thresholds: hysteresis — hold the current state */
+      /* between the two thresholds: hysteresis - hold the current state */
     }, 50);
   }
   function stopNoiseGate(){ if(gateTimer){ clearInterval(gateTimer); gateTimer = null; } }
@@ -201,7 +201,7 @@
     compressorNode.release.value = 0.25;
 
     // Makeup gain: the limiter smooths peaks well below full scale, so this
-    // stage after it restores overall loudness — loud but clean.
+    // stage after it restores overall loudness - loud but clean.
     makeupNode = audioCtx.createGain();
     makeupNode.gain.value = loud.makeup;
 
@@ -233,7 +233,7 @@
     startNoiseGate();
 
     isListening = true;
-    showToast("Listening — speak normally");
+    showToast("Listening - speak normally");
     document.getElementById("stage").classList.add("listening");
     document.getElementById("listen-icon").textContent = "⏸️";
     document.getElementById("listen-label").textContent = "Stop";
@@ -314,7 +314,7 @@
       stopListening();
       showToast("Stopped");
     } else {
-      showToast("Starting — allow the microphone if asked");
+      showToast("Starting - allow the microphone if asked");
       startListening();
     }
   });
@@ -356,7 +356,7 @@
   /* ---------------- microphone routing (Bluetooth mitigation) ---------------- */
   /* Android/Chrome can auto-route the mic through a connected Bluetooth headset
      (phone-call style HFP/SCO), which is lower quality and higher latency.
-     Output routing to the headphones is unaffected — this only concerns input. */
+     Output routing to the headphones is unaffected - this only concerns input. */
   var BT_MIC_RE = /bluetooth|hands-?free|headset|hfp|sco|airpods?|earbud|buds|wireless/i;
 
   function isBluetoothMicLabel(label){
@@ -372,7 +372,7 @@
       var track = activeMicTrack(stream);
       if(!track || !isBluetoothMicLabel(track.label)) return stream;
 
-      // OS picked a Bluetooth/headset mic — try to switch to a built-in one.
+      // OS picked a Bluetooth/headset mic - try to switch to a built-in one.
       var devices = await navigator.mediaDevices.enumerateDevices();
       var builtIn = devices.find(function(d){
         return d.kind === "audioinput" &&
@@ -389,13 +389,13 @@
         }catch(e){ /* keep the original stream */ }
       }
 
-      // Labels aren't reliable on every Android build — if a Bluetooth mic is
+      // Labels aren't reliable on every Android build - if a Bluetooth mic is
       // still (or possibly) active, tell the user in plain language.
       var finalTrack = activeMicTrack(stream);
       if(finalTrack && isBluetoothMicLabel(finalTrack.label)){
         showMicWarning();
       }
-    }catch(e){ /* best effort — never block listening over this */ }
+    }catch(e){ /* best effort - never block listening over this */ }
     return stream;
   }
 
@@ -667,7 +667,7 @@
     lockBtn.addEventListener("click", lockScreen);
     unlockBtn.addEventListener("pointerdown", startUnlockHold);
     unlockBtn.addEventListener("pointerup", function(){
-      // Released too early — still locked, so remind them how it works.
+      // Released too early - still locked, so remind them how it works.
       if(unlockTimer) showLockHint();
       cancelUnlockHold(true);
     });
