@@ -1,7 +1,7 @@
 (function(){
   "use strict";
 
-  var APP_VERSION = "6.3"; // keep in step with CACHE_VERSION in sw.js
+  var APP_VERSION = "6.4"; // keep in step with CACHE_VERSION in sw.js
   console.log("Hear Clearly app.js version " + APP_VERSION);
 
   /* ---------------- state & storage ---------------- */
