@@ -1,0 +1,175 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, viewport-fit=cover">
+<title>Hear Clearly</title>
+<meta name="description" content="Makes voices louder and clearer through your headphones, with live captions.">
+<meta name="theme-color" content="#1F6F64">
+<link rel="manifest" href="manifest.json">
+<link rel="icon" type="image/png" sizes="192x192" href="icons/icon-192.png">
+<link rel="apple-touch-icon" href="icons/icon-192.png">
+<link rel="stylesheet" href="style.css">
+<script src="app.js" defer></script>
+</head>
+<body>
+<div class="app" id="app">
+
+  <!-- ONBOARDING -->
+  <div class="view active" id="view-onboard">
+    <div class="onboard-icon">🦻</div>
+    <h1 class="onboard-title">Hear conversations more clearly</h1>
+    <p class="onboard-body">This app makes voices louder and clearer through your headphones, and shows what's being said as text on screen.</p>
+    <ul class="onboard-list">
+      <li><span class="emoji">🎧</span><span>Plug in your headphones or earbuds before you start.</span></li>
+      <li><span class="emoji">🎤</span><span>The app will ask to use your microphone — please allow it.</span></li>
+      <li><span class="emoji">🔋</span><span>Keep the app open on screen while you're using it.</span></li>
+    </ul>
+    <button class="btn btn-primary" id="btn-onboard-continue" style="max-width:380px;">Get Started</button>
+  </div>
+
+  <!-- HOME -->
+  <div class="view" id="view-home">
+    <div class="topbar">
+      <div class="brand"><div class="brand-mark">🦻</div><div class="brand-name">Hear Clearly</div></div>
+      <div class="row-gap-10">
+        <button class="gear-btn" id="btn-transcripts" aria-label="Past conversations" title="Past conversations">
+          <span class="icon">📝</span>
+        </button>
+        <button class="gear-btn" id="btn-gear" aria-label="Hold to open setup" title="Hold to open setup">
+          <span class="fill"></span><span class="icon">⚙️</span>
+        </button>
+      </div>
+    </div>
+
+    <div class="status-row">
+      <div class="status-dot" id="status-dot"></div>
+      <span id="status-text">Not listening</span>
+      <span id="net-dot" style="margin-left:8px;">•</span>
+      <span id="net-text"></span>
+    </div>
+
+    <div class="stage" id="stage">
+      <div class="listen-wrap">
+        <div class="ring r1"></div><div class="ring r2"></div><div class="ring r3"></div>
+        <button class="listen-btn" id="btn-listen">
+          <span class="big-icon" id="listen-icon">🎙️</span>
+          <span id="listen-label">Start</span>
+        </button>
+      </div>
+      <div class="noise-meter"><div class="noise-fill" id="noise-fill"></div></div>
+      <div class="headphone-note" id="headphone-note">🎧 Make sure your headphones are connected</div>
+    </div>
+
+    <div class="caption-box" id="caption-box">
+      <div class="caption-empty" id="caption-empty">Captions of what's said will appear here once you start.</div>
+    </div>
+    <div class="caption-tools">
+      <button class="tool-btn" id="btn-repeat">🔁 Repeat last</button>
+      <button class="tool-btn" id="btn-caption-size">🔠 Text size</button>
+    </div>
+
+    <div class="stack-gap" id="simple-controls">
+      <div class="slider-row">
+        <div class="slider-label"><span>Volume boost</span><span id="boost-value">2.0×</span></div>
+        <input type="range" id="boost-slider" min="1" max="5" step="0.1" value="2">
+      </div>
+      <div class="presets-row" id="presets-row">
+        <button class="preset-btn" data-preset="quiet"><span class="emoji">🛋️</span>Quiet room</button>
+        <button class="preset-btn" data-preset="noisy"><span class="emoji">🍽️</span>Noisy place</button>
+        <button class="preset-btn" data-preset="outdoor"><span class="emoji">🌳</span>Outdoors</button>
+      </div>
+    </div>
+
+    <div class="stack-gap" id="advanced-controls" style="display:none;">
+      <div class="slider-row">
+        <div class="slider-label"><span>Speech tone frequency</span><span id="freq-value">2500 Hz</span></div>
+        <input type="range" id="freq-slider" min="1000" max="6000" step="100" value="2500">
+      </div>
+      <div class="slider-row">
+        <div class="slider-label"><span>Speech boost amount</span><span id="db-value">9 dB</span></div>
+        <input type="range" id="db-slider" min="0" max="18" step="1" value="9">
+      </div>
+    </div>
+
+    <button class="emergency-btn" id="btn-emergency">☎️ Call <span id="emergency-name-label">for help</span></button>
+  </div>
+
+  <!-- TRANSCRIPTS LIST -->
+  <div class="view" id="view-transcripts">
+    <div class="topbar">
+      <button class="back-btn" id="btn-back-from-transcripts">‹ Back</button>
+      <h2 style="font-size:19px;">Past Conversations</h2>
+      <div style="width:48px;"></div>
+    </div>
+    <div class="stack-gap" id="sessions-list" style="margin-top:10px;"></div>
+  </div>
+
+  <!-- TRANSCRIPT DETAIL -->
+  <div class="view" id="view-transcript-detail">
+    <div class="topbar">
+      <button class="back-btn" id="btn-back-from-detail">‹ Back</button>
+      <h2 style="font-size:19px;" id="detail-title">Conversation</h2>
+      <div style="width:48px;"></div>
+    </div>
+    <div id="detail-lines" style="margin-top:6px;"></div>
+    <button class="btn btn-secondary" id="btn-copy-transcript" style="margin-top:16px;">📋 Copy conversation text</button>
+  </div>
+
+  <!-- SETUP (caregiver) -->
+  <div class="view" id="view-setup">
+    <div class="topbar">
+      <button class="back-btn" id="btn-back-from-setup">‹ Back</button>
+      <h2 style="font-size:19px;">Setup</h2>
+      <div style="width:48px;"></div>
+    </div>
+    <p style="color:var(--muted); font-size:15px; margin-bottom:16px;">These settings are usually set up once by a family member. The person using the app won't need to visit this screen again.</p>
+    <div class="stack-gap">
+      <div class="field-group">
+        <label class="field-label" for="setup-boost">Default volume boost</label>
+        <input type="range" id="setup-boost" min="1" max="5" step="0.1" value="2">
+      </div>
+      <div class="field-group">
+        <label class="field-label" for="setup-caption-size">Default caption text size</label>
+        <select id="setup-caption-size">
+          <option value="1">Small</option>
+          <option value="2" selected>Medium</option>
+          <option value="3">Large</option>
+          <option value="4">Huge</option>
+        </select>
+      </div>
+      <div class="field-group">
+        <label class="field-label" for="setup-theme">App appearance</label>
+        <select id="setup-theme">
+          <option value="auto" selected>Match phone setting</option>
+          <option value="light">Light</option>
+          <option value="dark">Dark</option>
+        </select>
+      </div>
+      <div class="field-group">
+        <label class="field-label" for="setup-name">Emergency contact name</label>
+        <input type="text" id="setup-name" placeholder="e.g. Priya (daughter)">
+      </div>
+      <div class="field-group">
+        <label class="field-label" for="setup-phone">Emergency contact phone</label>
+        <input type="tel" id="setup-phone" placeholder="e.g. +91 98765 43210">
+      </div>
+      <div class="mode-toggle">
+        <div>
+          <div class="field-label">Advanced mode</div>
+          <div style="font-size:14px;color:var(--muted);">Show manual sound-tuning controls</div>
+        </div>
+        <div class="switch" id="setup-advanced-switch"><div class="knob"></div></div>
+      </div>
+      <div class="privacy-note">🔒 To show captions, this app sends short bits of audio to your browser's speech recognition service over the internet. Audio for the volume boost itself never leaves the phone.</div>
+      <button class="btn btn-primary" id="btn-save-setup">Save settings</button>
+    </div>
+  </div>
+
+</div>
+
+<div class="repeat-overlay" id="repeat-overlay"></div>
+<div class="save-toast" id="save-toast">Saved</div>
+
+</body>
+</html>
