@@ -4,7 +4,7 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, viewport-fit=cover">
 <title>Hear Clearly</title>
-<meta name="description" content="Makes voices louder and clearer through your headphones, with live captions.">
+<meta name="description" content="Makes voices louder and clearer through your headphones. Works fully offline.">
 <meta name="theme-color" content="#1F6F64">
 <link rel="manifest" href="manifest.json">
 <link rel="icon" type="image/png" sizes="192x192" href="icons/icon-192.png">
@@ -19,7 +19,7 @@
   <div class="view active" id="view-onboard">
     <div class="onboard-icon">🦻</div>
     <h1 class="onboard-title">Hear conversations more clearly</h1>
-    <p class="onboard-body">This app makes voices louder and clearer through your headphones, and shows what's being said as text on screen.</p>
+    <p class="onboard-body">This app makes voices louder and clearer through your headphones.</p>
     <ul class="onboard-list">
       <li><span class="emoji">🎧</span><span>Plug in your headphones or earbuds before you start.</span></li>
       <li><span class="emoji">🎤</span><span>The app will ask to use your microphone — please allow it.</span></li>
@@ -33,9 +33,6 @@
     <div class="topbar">
       <div class="brand"><div class="brand-mark">🦻</div><div class="brand-name">Hear Clearly</div></div>
       <div class="row-gap-10">
-        <button class="gear-btn" id="btn-transcripts" aria-label="Past conversations" title="Past conversations">
-          <span class="icon">📝</span>
-        </button>
         <button class="gear-btn" id="btn-gear" aria-label="Hold to open setup" title="Hold to open setup">
           <span class="fill"></span><span class="icon">⚙️</span>
         </button>
@@ -45,8 +42,6 @@
     <div class="status-row">
       <div class="status-dot" id="status-dot"></div>
       <span id="status-text">Not listening</span>
-      <span id="net-dot" style="margin-left:8px;">•</span>
-      <span id="net-text"></span>
     </div>
 
     <div class="stage" id="stage">
@@ -62,13 +57,8 @@
       <div class="mic-warning" id="mic-warning" style="display:none;">⚠️ Using the Bluetooth headset's microphone — sound quality and delay may be worse. Try wired headphones for the microphone side if this happens often.</div>
     </div>
 
-    <div class="caption-box" id="caption-box">
-      <div class="caption-empty" id="caption-empty">Captions of what's said will appear here once you start.</div>
-    </div>
-    <div class="caption-tools">
-      <button class="tool-btn" id="btn-repeat">🔁 Repeat last</button>
-      <button class="tool-btn" id="btn-caption-size">🔠 Text size</button>
-      <button class="tool-btn" id="btn-lock" style="display:none;">🔒 Lock</button>
+    <div class="tools-row">
+      <button class="tool-btn" id="btn-lock" style="display:none;">🔒 Lock screen</button>
     </div>
 
     <div class="stack-gap" id="simple-controls">
@@ -97,27 +87,6 @@
     <button class="emergency-btn" id="btn-emergency">☎️ Call <span id="emergency-name-label">for help</span></button>
   </div>
 
-  <!-- TRANSCRIPTS LIST -->
-  <div class="view" id="view-transcripts">
-    <div class="topbar">
-      <button class="back-btn" id="btn-back-from-transcripts">‹ Back</button>
-      <h2 style="font-size:19px;">Past Conversations</h2>
-      <div style="width:48px;"></div>
-    </div>
-    <div class="stack-gap" id="sessions-list" style="margin-top:10px;"></div>
-  </div>
-
-  <!-- TRANSCRIPT DETAIL -->
-  <div class="view" id="view-transcript-detail">
-    <div class="topbar">
-      <button class="back-btn" id="btn-back-from-detail">‹ Back</button>
-      <h2 style="font-size:19px;" id="detail-title">Conversation</h2>
-      <div style="width:48px;"></div>
-    </div>
-    <div id="detail-lines" style="margin-top:6px;"></div>
-    <button class="btn btn-secondary" id="btn-copy-transcript" style="margin-top:16px;">📋 Copy conversation text</button>
-  </div>
-
   <!-- SETUP (caregiver) -->
   <div class="view" id="view-setup">
     <div class="topbar">
@@ -130,22 +99,6 @@
       <div class="field-group">
         <label class="field-label" for="setup-boost">Default volume boost</label>
         <input type="range" id="setup-boost" min="1" max="5" step="0.1" value="2">
-      </div>
-      <div class="field-group">
-        <label class="field-label" for="setup-caption-size">Default caption text size</label>
-        <select id="setup-caption-size">
-          <option value="1">Small</option>
-          <option value="2" selected>Medium</option>
-          <option value="3">Large</option>
-          <option value="4">Huge</option>
-        </select>
-      </div>
-      <div class="mode-toggle">
-        <div>
-          <div class="field-label">Live captions</div>
-          <div style="font-size:14px;color:var(--muted);">Turn off if you hear a beep every few seconds</div>
-        </div>
-        <div class="switch on" id="setup-captions-switch" data-on="1"><div class="knob"></div></div>
       </div>
       <div class="field-group">
         <label class="field-label" for="setup-theme">App appearance</label>
@@ -177,21 +130,23 @@
         </div>
         <div class="switch" id="setup-advanced-switch"><div class="knob"></div></div>
       </div>
-      <div class="privacy-note">🔒 To show captions, this app sends short bits of audio to your browser's speech recognition service over the internet. Audio for the volume boost itself never leaves the phone.</div>
+      <div class="privacy-note">🔒 Sound from the microphone is processed only on this phone. Nothing is ever sent over the internet — the app works fully offline.</div>
       <button class="btn btn-primary" id="btn-save-setup">Save settings</button>
-      <p style="text-align:center;color:var(--muted);font-size:14px;">App version 5.7</p>
+      <p style="text-align:center;color:var(--muted);font-size:14px;">App version 6.0</p>
     </div>
   </div>
 
 </div>
 
-<div class="repeat-overlay" id="repeat-overlay"></div>
-
 <!-- SCREEN LOCK -->
 <div class="lock-overlay" id="lock-overlay">
   <div class="lock-inner">
     <div class="status-row"><div class="status-dot on"></div><span>Listening — screen is locked</span></div>
-    <div class="lock-captions" id="lock-captions"></div>
+    <div class="lock-panel">
+      <div class="lock-panel-icon">🎧</div>
+      <div>Volume boost is running.</div>
+      <div class="lock-panel-sub">The screen is locked so buttons can't be pressed by accident.</div>
+    </div>
     <div class="lock-hint" id="lock-hint">Hold the button below to unlock</div>
     <button class="unlock-btn" id="btn-unlock"><span class="fill"></span><span class="label">🔓 Hold to unlock</span></button>
     <button class="emergency-btn" id="btn-emergency-lock">☎️ Call <span id="emergency-name-label-lock">for help</span></button>

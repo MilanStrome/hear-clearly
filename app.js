@@ -1,18 +1,16 @@
 (function(){
   "use strict";
 
-  var APP_VERSION = "5.7"; // keep in step with CACHE_VERSION in sw.js
+  var APP_VERSION = "6.0"; // keep in step with CACHE_VERSION in sw.js
   console.log("Hear Clearly app.js version " + APP_VERSION);
 
   /* ---------------- state & storage ---------------- */
   var DEFAULT_SETTINGS = {
-    boost: 2, captionSize: 2, theme: "auto", advanced: false,
+    boost: 2, theme: "auto", advanced: false,
     emergencyName: "", emergencyPhone: "", showEmergency: true,
-    captionsEnabled: true,
     freq: 2500, boostDb: 9
   };
   var settings = loadJSON("ha_settings", DEFAULT_SETTINGS);
-  var sessions = loadJSON("ha_sessions", []);
   var onboarded = localStorage.getItem("ha_onboarded") === "1";
 
   function loadJSON(key, fallback){
@@ -23,7 +21,6 @@
     }catch(e){ return JSON.parse(JSON.stringify(fallback)); }
   }
   function saveSettings(){ try{ localStorage.setItem("ha_settings", JSON.stringify(settings)); }catch(e){} }
-  function saveSessions(){ try{ localStorage.setItem("ha_sessions", JSON.stringify(sessions.slice(0,30))); }catch(e){} }
 
   function applyTheme(){
     var root = document.documentElement;
@@ -35,7 +32,7 @@
 
   /* ---------------- view switching ---------------- */
   var views = {};
-  ["onboard","home","transcripts","transcript-detail","setup"].forEach(function(id){
+  ["onboard","home","setup"].forEach(function(id){
     views[id] = document.getElementById("view-"+id);
   });
   function showView(id){
@@ -53,25 +50,10 @@
   var isListening = false;
   var noiseRAF = null;
 
-  function currentSettingsIntoUI(){
-    document.getElementById("boost-slider").value = settings.boost;
-    document.getElementById("boost-value").textContent = Number(settings.boost).toFixed(1) + "×";
-    document.getElementById("freq-slider").value = settings.freq;
-    document.getElementById("freq-value").textContent = settings.freq + " Hz";
-    document.getElementById("db-slider").value = settings.boostDb;
-    document.getElementById("db-value").textContent = settings.boostDb + " dB";
-    document.getElementById("advanced-controls").style.display = settings.advanced ? "flex" : "none";
-    document.getElementById("simple-controls").style.display = "flex";
-    applyCaptionSizeToDOM();
-    updateEmergencyLabel();
-    applyEmergencyVisibility();
-  }
-  currentSettingsIntoUI();
-
   // These are the settings that reliably produce audible output on Android;
   // disabling echoCancellation made several devices go fully silent (Chrome
-  // routes the audio differently without it). The clipping side of the old
-  // "blur" is handled by the limiter in the chain instead.
+  // routes the audio differently without it). Clipping distortion is handled
+  // by the limiter in the chain instead.
   var MIC_CONSTRAINTS = {echoCancellation:true, noiseSuppression:true, autoGainControl:true};
 
   // Android quirk: WebAudio output from a mic stream can stay silent unless
@@ -90,6 +72,20 @@
       if(keepAliveAudio){ keepAliveAudio.pause(); keepAliveAudio.srcObject = null; }
     }catch(e){}
   }
+
+  function currentSettingsIntoUI(){
+    document.getElementById("boost-slider").value = settings.boost;
+    document.getElementById("boost-value").textContent = Number(settings.boost).toFixed(1) + "×";
+    document.getElementById("freq-slider").value = settings.freq;
+    document.getElementById("freq-value").textContent = settings.freq + " Hz";
+    document.getElementById("db-slider").value = settings.boostDb;
+    document.getElementById("db-value").textContent = settings.boostDb + " dB";
+    document.getElementById("advanced-controls").style.display = settings.advanced ? "flex" : "none";
+    document.getElementById("simple-controls").style.display = "flex";
+    updateEmergencyLabel();
+    applyEmergencyVisibility();
+  }
+  currentSettingsIntoUI();
 
   async function startListening(){
     try{
@@ -141,15 +137,13 @@
     document.getElementById("status-text").textContent = "Listening";
     checkHeadphoneHint();
     startNoiseMeter();
-    startCaptions();
     requestWakeLock();
-    beginSession();
     var lb = document.getElementById("btn-lock");
     if(lb) lb.style.display = "flex";
     watchForSilentMic();
   }
 
-  /* Some Android devices deliver a silent stream when processing is disabled.
+  /* Some Android devices deliver a silent stream in unusual configurations.
      Watch the first ~3s of a session: a real mic never flatlines exactly at
      zero (even a quiet room has noise-floor wobble). If it does, re-request
      the mic with the browser's default settings and swap it in. */
@@ -197,7 +191,6 @@
     document.getElementById("status-dot").classList.remove("on");
     document.getElementById("status-text").textContent = "Not listening";
     stopNoiseMeter();
-    stopCaptions();
     releaseWakeLock();
     hideMicWarning();
     if(silenceCheckTimer){ clearTimeout(silenceCheckTimer); silenceCheckTimer = null; }
@@ -353,182 +346,6 @@
     });
   });
 
-  /* ---------------- captions ---------------- */
-  var recognition = null, recognitionActive = false, restartTimer = null;
-  var lastFinalCaption = "";
-  var currentSession = null;
-
-  function getSpeechRecognitionClass(){
-    return window.SpeechRecognition || window.webkitSpeechRecognition || null;
-  }
-
-  function startCaptions(){
-    if(settings.captionsEnabled === false){
-      showCaptionsOff();
-      return;
-    }
-    var SR = getSpeechRecognitionClass();
-    var box = document.getElementById("caption-box");
-    var empty = document.getElementById("caption-empty");
-    if(!SR){
-      if(empty){ empty.textContent = "Captions aren't supported in this browser."; }
-      return;
-    }
-    if(!navigator.onLine){
-      showCaptionsOffline();
-      return;
-    }
-    if(empty) empty.remove();
-
-    recognition = new SR();
-    recognition.continuous = true;
-    recognition.interimResults = true;
-    recognition.lang = navigator.language || "en-US";
-
-    recognition.onresult = function(event){
-      var interim = "";
-      for(var i = event.resultIndex; i < event.results.length; i++){
-        var res = event.results[i];
-        var text = res[0].transcript.trim();
-        if(res.isFinal){
-          if(text){ addFinalCaption(text); }
-        } else {
-          interim += text + " ";
-        }
-      }
-      renderInterim(interim.trim());
-    };
-    recognition.onerror = function(e){ /* swallow; onend restarts */ };
-    recognition.onend = function(){
-      if(isListening){
-        restartTimer = setTimeout(function(){ try{ recognition.start(); }catch(e){} }, 250);
-      }
-    };
-    try{ recognition.start(); recognitionActive = true; }catch(e){}
-  }
-
-  function stopCaptions(){
-    recognitionActive = false;
-    if(restartTimer){ clearTimeout(restartTimer); restartTimer = null; }
-    if(recognition){
-      recognition.onend = null;
-      try{ recognition.stop(); }catch(e){}
-      recognition = null;
-    }
-  }
-
-  function showCaptionsOffline(){
-    var box = document.getElementById("caption-box");
-    box.innerHTML = '<div class="caption-empty">🔌 No internet connection — captions are unavailable right now.<br><br>Your volume boost is still working normally through your headphones.</div>';
-  }
-
-  function showCaptionsOff(){
-    var box = document.getElementById("caption-box");
-    box.innerHTML = '<div class="caption-empty">💬 Captions are turned off. Your volume boost is working normally.<br><br>A family member can turn captions back on in Setup.</div>';
-  }
-
-  function resetCaptionBox(){
-    var box = document.getElementById("caption-box");
-    box.innerHTML = '<div class="caption-empty" id="caption-empty">Captions of what\'s said will appear here once you start.</div>';
-  }
-
-  function updateNetStatus(){
-    var dot = document.getElementById("net-dot");
-    var text = document.getElementById("net-text");
-    if(navigator.onLine){
-      dot.style.color = "var(--success)";
-      text.textContent = "Online";
-    } else {
-      dot.style.color = "var(--emergency)";
-      text.textContent = "Offline — captions paused, boost still on";
-    }
-  }
-  window.addEventListener("online", function(){
-    updateNetStatus();
-    if(isListening && !recognitionActive && settings.captionsEnabled !== false){
-      resetCaptionBox();
-      startCaptions();
-    }
-  });
-  window.addEventListener("offline", function(){
-    updateNetStatus();
-    if(isListening){
-      stopCaptions();
-      showCaptionsOffline();
-    }
-  });
-  updateNetStatus();
-
-  function addFinalCaption(text){
-    lastFinalCaption = text;
-    var box = document.getElementById("caption-box");
-    document.querySelectorAll(".caption-line.interim").forEach(function(n){ n.remove(); });
-    var lines = box.querySelectorAll(".caption-line:not(.interim)");
-    lines.forEach(function(n){ n.classList.add("old"); });
-    while(box.querySelectorAll(".caption-line:not(.interim)").length > 8){
-      var first = box.querySelector(".caption-line:not(.interim)");
-      if(first) first.remove(); else break;
-    }
-    var div = document.createElement("div");
-    div.className = "caption-line";
-    div.textContent = text;
-    box.appendChild(div);
-    box.scrollTop = box.scrollHeight;
-
-    if(currentSession){
-      currentSession.lines.push({t: Date.now(), text: text});
-      saveSessions();
-    }
-  }
-
-  function renderInterim(text){
-    var box = document.getElementById("caption-box");
-    var interimEl = box.querySelector(".caption-line.interim");
-    if(!text){ if(interimEl) interimEl.remove(); return; }
-    if(!interimEl){
-      interimEl = document.createElement("div");
-      interimEl.className = "caption-line interim";
-      box.appendChild(interimEl);
-    }
-    interimEl.textContent = text;
-    box.scrollTop = box.scrollHeight;
-  }
-
-  function applyCaptionSizeToDOM(){
-    var box = document.getElementById("caption-box");
-    box.classList.remove("cap-size-1","cap-size-2","cap-size-3","cap-size-4");
-    box.classList.add("cap-size-" + (settings.captionSize || 2));
-  }
-
-  var CAPTION_SIZE_NAMES = {1:"Small", 2:"Medium", 3:"Large", 4:"Huge"};
-  document.getElementById("btn-caption-size").addEventListener("click", function(){
-    settings.captionSize = (Number(settings.captionSize || 2) % 4) + 1;
-    applyCaptionSizeToDOM();
-    saveSettings();
-    showToast("Text size: " + CAPTION_SIZE_NAMES[settings.captionSize]);
-  });
-
-  document.getElementById("btn-repeat").addEventListener("click", function(){
-    var overlay = document.getElementById("repeat-overlay");
-    var noCaptionMsg = settings.captionsEnabled === false
-      ? "Captions are turned off, so there is nothing to repeat. A family member can turn them on in Setup."
-      : "Nothing has been said yet.";
-    var text = lastFinalCaption || noCaptionMsg;
-    overlay.textContent = text;
-    overlay.classList.add("show");
-    if("speechSynthesis" in window && lastFinalCaption){
-      try{
-        var utter = new SpeechSynthesisUtterance(text);
-        utter.rate = 0.95;
-        window.speechSynthesis.speak(utter);
-      }catch(e){}
-    }
-    setTimeout(function(){ overlay.classList.remove("show"); }, 3200);
-  });
-  document.getElementById("repeat-overlay").addEventListener("click", function(){
-    this.classList.remove("show");
-  });
-
   /* ---------------- wake lock ---------------- */
   var wakeLock = null;
   async function requestWakeLock(){
@@ -541,89 +358,6 @@
   document.addEventListener("visibilitychange", async function(){
     if(document.visibilityState === "visible" && isListening && "wakeLock" in navigator){
       try{ wakeLock = await navigator.wakeLock.request("screen"); }catch(e){}
-    }
-  });
-
-  /* ---------------- sessions / transcripts ---------------- */
-  function beginSession(){
-    currentSession = {id: Date.now().toString(36), startedAt: Date.now(), lines: []};
-    sessions.unshift(currentSession);
-    saveSessions();
-  }
-
-  function fmtDate(ts){
-    var d = new Date(ts);
-    return d.toLocaleDateString(undefined,{month:"short", day:"numeric"}) + " · " + d.toLocaleTimeString(undefined,{hour:"numeric", minute:"2-digit"});
-  }
-
-  function renderSessionsList(){
-    var wrap = document.getElementById("sessions-list");
-    wrap.innerHTML = "";
-    var withLines = sessions.filter(function(s){ return s.lines && s.lines.length; });
-    if(!withLines.length){
-      wrap.innerHTML = '<div class="empty-state"><div class="emoji">📝</div><p>No conversations saved yet.<br>They will appear here after you use Start.</p></div>';
-      return;
-    }
-    withLines.forEach(function(s){
-      var card = document.createElement("div");
-      card.className = "session-card";
-      var preview = s.lines[0] ? s.lines[0].text : "";
-      card.innerHTML = '<div class="session-date">'+fmtDate(s.startedAt)+'</div>'+
-        '<div class="session-preview">'+escapeHTML(preview)+'</div>'+
-        '<div class="session-count">'+s.lines.length+' line'+(s.lines.length===1?"":"s")+'</div>';
-      card.addEventListener("click", function(){ openSessionDetail(s.id); });
-      wrap.appendChild(card);
-    });
-  }
-
-  function escapeHTML(str){
-    var d = document.createElement("div");
-    d.textContent = str || "";
-    return d.innerHTML;
-  }
-
-  var openSessionId = null;
-  function openSessionDetail(id){
-    openSessionId = id;
-    var s = sessions.find(function(x){ return x.id === id; });
-    if(!s) return;
-    document.getElementById("detail-title").textContent = fmtDate(s.startedAt);
-    var wrap = document.getElementById("detail-lines");
-    wrap.innerHTML = "";
-    s.lines.forEach(function(line){
-      var el = document.createElement("div");
-      el.className = "transcript-line";
-      var t = new Date(line.t).toLocaleTimeString(undefined,{hour:"numeric", minute:"2-digit"});
-      el.innerHTML = '<div class="transcript-time">'+t+'</div><div>'+escapeHTML(line.text)+'</div>';
-      wrap.appendChild(el);
-    });
-    showView("transcript-detail");
-  }
-
-  document.getElementById("btn-transcripts").addEventListener("click", function(){
-    renderSessionsList();
-    showView("transcripts");
-  });
-  document.getElementById("btn-back-from-transcripts").addEventListener("click", function(){ showView("home"); });
-  document.getElementById("btn-back-from-detail").addEventListener("click", function(){ showView("transcripts"); });
-
-  document.getElementById("btn-copy-transcript").addEventListener("click", async function(){
-    var s = sessions.find(function(x){ return x.id === openSessionId; });
-    if(!s) return;
-    var text = "Conversation — " + fmtDate(s.startedAt) + "\n\n" + s.lines.map(function(l){
-      return new Date(l.t).toLocaleTimeString(undefined,{hour:"numeric", minute:"2-digit"}) + " — " + l.text;
-    }).join("\n");
-    var shared = false;
-    if(navigator.share){
-      try{ await navigator.share({title:"Conversation transcript", text:text}); shared = true; }catch(e){}
-    }
-    if(!shared){
-      try{
-        await navigator.clipboard.writeText(text);
-        showToast("Copied to clipboard");
-      }catch(e){
-        showToast("Couldn't copy — try again");
-      }
     }
   });
 
@@ -654,15 +388,14 @@
 
   function openSetup(){
     document.getElementById("setup-boost").value = settings.boost;
-    document.getElementById("setup-caption-size").value = settings.captionSize;
     document.getElementById("setup-theme").value = settings.theme;
     document.getElementById("setup-name").value = settings.emergencyName;
     document.getElementById("setup-phone").value = settings.emergencyPhone;
     setSwitch(document.getElementById("setup-advanced-switch"), settings.advanced);
     setSwitch(document.getElementById("setup-emergency-switch"), settings.showEmergency !== false);
-    setSwitch(document.getElementById("setup-captions-switch"), settings.captionsEnabled !== false);
     showView("setup");
   }
+
   // Live preview: changing the appearance dropdown applies instantly so the
   // caregiver sees the effect; leaving without saving restores the saved theme.
   document.getElementById("setup-theme").addEventListener("change", function(){
@@ -689,40 +422,18 @@
   if(emSwitch) emSwitch.addEventListener("click", function(){
     setSwitch(this, this.dataset.on !== "1");
   });
-  var capSwitch = document.getElementById("setup-captions-switch");
-  if(capSwitch) capSwitch.addEventListener("click", function(){
-    setSwitch(this, this.dataset.on !== "1");
-  });
 
   document.getElementById("btn-save-setup").addEventListener("click", function(){
     settings.boost = Number(document.getElementById("setup-boost").value);
-    settings.captionSize = Number(document.getElementById("setup-caption-size").value);
     settings.theme = document.getElementById("setup-theme").value;
     settings.emergencyName = document.getElementById("setup-name").value.trim();
     settings.emergencyPhone = document.getElementById("setup-phone").value.trim();
     settings.advanced = document.getElementById("setup-advanced-switch").dataset.on === "1";
     var emSw = document.getElementById("setup-emergency-switch");
     if(emSw) settings.showEmergency = emSw.dataset.on === "1";
-    var capSw = document.getElementById("setup-captions-switch");
-    if(capSw) settings.captionsEnabled = capSw.dataset.on === "1";
     saveSettings();
-    // apply the captions choice immediately if a session is running
-    if(isListening){
-      if(settings.captionsEnabled === false){
-        stopCaptions();
-        showCaptionsOff();
-      } else if(!recognitionActive){
-        resetCaptionBox();
-        startCaptions();
-      }
-    } else if(settings.captionsEnabled === false){
-      showCaptionsOff();
-    } else {
-      resetCaptionBox();
-    }
     applyTheme();
     currentSettingsIntoUI();
-    updateEmergencyLabel();
     showToast("Settings saved");
     showView("home");
   });
@@ -737,26 +448,13 @@
   }
 
   /* ---------------- screen lock ---------------- */
-  /* Blocks accidental taps while listening. Captions stay visible on the
-     lock screen; unlock is a deliberate press-and-hold (same gesture as the
-     setup gear). The emergency button stays usable while locked. */
+  /* Blocks accidental taps while listening. Unlock is a deliberate
+     press-and-hold (same gesture as the setup gear). The emergency button
+     stays usable while locked. */
   var isLocked = false;
-  var lockObserver = null;
   var unlockTimer = null;
   var lockHintTimer = null;
 
-  function mirrorCaptionsToLock(){
-    var box = document.getElementById("caption-box");
-    var lc = document.getElementById("lock-captions");
-    var size = (box.className.match(/cap-size-\d/) || [""])[0];
-    lc.className = "lock-captions " + size;
-    lc.innerHTML = box.innerHTML;
-    lc.querySelectorAll("[id]").forEach(function(n){ n.removeAttribute("id"); });
-    lc.scrollTop = lc.scrollHeight;
-  }
-
-  // Elements may be absent if an older index.html is being served alongside
-  // this script (stale cache) — the lock feature then simply stays off.
   var lockBtn = document.getElementById("btn-lock");
   var lockOverlayEl = document.getElementById("lock-overlay");
   var unlockBtn = document.getElementById("btn-unlock");
@@ -765,17 +463,12 @@
   function lockScreen(){
     if(!lockSupported || isLocked) return;
     isLocked = true;
-    mirrorCaptionsToLock();
-    lockObserver = new MutationObserver(mirrorCaptionsToLock);
-    lockObserver.observe(document.getElementById("caption-box"),
-      {childList:true, subtree:true, characterData:true, attributes:true});
     lockOverlayEl.classList.add("show");
   }
 
   function unlockScreen(){
     if(!isLocked) return;
     isLocked = false;
-    if(lockObserver){ lockObserver.disconnect(); lockObserver = null; }
     cancelUnlockHold(true);
     lockOverlayEl.classList.remove("show");
     var hint = document.getElementById("lock-hint");

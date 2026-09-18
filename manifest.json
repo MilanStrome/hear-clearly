@@ -1,7 +1,7 @@
 {
   "name": "Hear Clearly",
   "short_name": "Hear Clearly",
-  "description": "Makes voices louder and clearer through your headphones, with live captions.",
+  "description": "Makes voices louder and clearer through your headphones. Works fully offline.",
   "start_url": "./",
   "scope": "./",
   "display": "standalone",
