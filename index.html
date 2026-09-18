@@ -33,7 +33,6 @@
     <div class="topbar">
       <div class="brand"><div class="brand-mark">🦻</div><div class="brand-name">Hear Clearly</div></div>
       <div class="row-gap-10">
-        <button class="gear-btn call-btn" id="btn-emergency-top" aria-label="Call for help" title="Call for help">☎️</button>
         <button class="gear-btn" id="btn-gear" aria-label="Hold to open setup" title="Hold to open setup">
           <span class="fill"></span><span class="icon">⚙️</span>
         </button>
@@ -59,13 +58,18 @@
     </div>
 
     <div class="tools-row">
+      <button class="tool-btn" id="btn-test-sound">🔔 Test sound</button>
       <button class="tool-btn" id="btn-lock" style="display:none;">🔒 Lock screen</button>
     </div>
 
     <div class="stack-gap" id="simple-controls">
       <div class="slider-row">
         <div class="slider-label"><span>Volume boost</span><span id="boost-value">2.0×</span></div>
-        <input type="range" id="boost-slider" min="1" max="8" step="0.1" value="2">
+        <div class="boost-row">
+          <button class="vol-btn" id="btn-vol-down" aria-label="Quieter">−</button>
+          <input type="range" id="boost-slider" min="1" max="10" step="0.1" value="2">
+          <button class="vol-btn" id="btn-vol-up" aria-label="Louder">+</button>
+        </div>
       </div>
       <div class="presets-row" id="presets-row">
         <button class="preset-btn" data-preset="quiet"><span class="emoji">🛋️</span>Quiet room</button>
@@ -99,8 +103,14 @@
     <div class="stack-gap">
       <div class="field-group">
         <label class="field-label" for="setup-boost">Default volume boost</label>
-        <input type="range" id="setup-boost" min="1" max="8" step="0.1" value="2">
+        <input type="range" id="setup-boost" min="1" max="10" step="0.1" value="2">
         <div style="font-size:14px;color:var(--muted);">High boost can be very loud — choose a comfortable level.</div>
+      </div>
+      <div class="field-group">
+        <label class="field-label" for="setup-balance">Ear balance</label>
+        <input type="range" id="setup-balance" min="-1" max="1" step="0.1" value="0">
+        <div class="balance-labels"><span>Left ear</span><span>Both</span><span>Right ear</span></div>
+        <div style="font-size:14px;color:var(--muted);">Send more sound to the ear that hears less well.</div>
       </div>
       <div class="field-group">
         <label class="field-label" for="setup-theme">App appearance</label>
@@ -134,7 +144,7 @@
       </div>
       <div class="privacy-note">🔒 Sound from the microphone is processed only on this phone. Nothing is ever sent over the internet — the app works fully offline.</div>
       <button class="btn btn-primary" id="btn-save-setup">Save settings</button>
-      <p style="text-align:center;color:var(--muted);font-size:14px;">App version 6.1</p>
+      <p style="text-align:center;color:var(--muted);font-size:14px;">App version 6.2</p>
     </div>
   </div>
 
@@ -155,6 +165,7 @@
   </div>
 </div>
 
+<button class="update-banner" id="update-banner" style="display:none;">⬇️ Update ready — tap to refresh</button>
 <div class="save-toast" id="save-toast">Saved</div>
 
 </body>

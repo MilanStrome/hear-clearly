@@ -1,13 +1,14 @@
 (function(){
   "use strict";
 
-  var APP_VERSION = "6.1"; // keep in step with CACHE_VERSION in sw.js
+  var APP_VERSION = "6.2"; // keep in step with CACHE_VERSION in sw.js
   console.log("Hear Clearly app.js version " + APP_VERSION);
 
   /* ---------------- state & storage ---------------- */
   var DEFAULT_SETTINGS = {
     boost: 2, theme: "auto", advanced: false,
     emergencyName: "", emergencyPhone: "", showEmergency: true,
+    balance: 0,
     freq: 2500, boostDb: 9
   };
   var settings = loadJSON("ha_settings", DEFAULT_SETTINGS);
@@ -47,7 +48,7 @@
 
   /* ---------------- audio engine ---------------- */
   var audioCtx = null, micStream = null, sourceNode = null, gainNode = null, filterNode = null, analyserNode = null, compressorNode = null;
-  var hpfNode = null, gateNode = null, gateAnalyser = null;
+  var hpfNode = null, gateNode = null, gateAnalyser = null, makeupNode = null, pannerNode = null;
   var isListening = false;
   var noiseRAF = null;
 
@@ -171,6 +172,15 @@
     compressorNode.attack.value = 0.003;
     compressorNode.release.value = 0.25;
 
+    // Makeup gain: the limiter smooths peaks well below full scale, so a
+    // fixed +6dB stage after it restores overall loudness — loud but clean.
+    makeupNode = audioCtx.createGain();
+    makeupNode.gain.value = 2.0;
+
+    // Ear balance: shifts output toward the ear that hears less well.
+    pannerNode = audioCtx.createStereoPanner ? audioCtx.createStereoPanner() : null;
+    if(pannerNode) pannerNode.pan.value = Number(settings.balance || 0);
+
     sourceNode.connect(hpfNode);
     hpfNode.connect(gateAnalyser);
     hpfNode.connect(gainNode);
@@ -178,7 +188,13 @@
     filterNode.connect(analyserNode);
     filterNode.connect(gateNode);
     gateNode.connect(compressorNode);
-    compressorNode.connect(audioCtx.destination);
+    compressorNode.connect(makeupNode);
+    if(pannerNode){
+      makeupNode.connect(pannerNode);
+      pannerNode.connect(audioCtx.destination);
+    } else {
+      makeupNode.connect(audioCtx.destination);
+    }
     startNoiseGate();
 
     isListening = true;
@@ -254,7 +270,7 @@
     releaseKeepAlive();
     if(micStream){ micStream.getTracks().forEach(function(t){ t.stop(); }); micStream = null; }
     if(audioCtx){ audioCtx.close().catch(function(){}); audioCtx = null; }
-    compressorNode = null; hpfNode = null; gateNode = null; gateAnalyser = null;
+    compressorNode = null; hpfNode = null; gateNode = null; gateAnalyser = null; makeupNode = null; pannerNode = null;
     document.getElementById("noise-fill").style.width = "0%";
   }
 
@@ -358,12 +374,23 @@
   }
 
   /* ---------------- sliders ---------------- */
-  document.getElementById("boost-slider").addEventListener("input", function(e){
-    settings.boost = Number(e.target.value);
-    document.getElementById("boost-value").textContent = settings.boost.toFixed(1) + "×";
-    if(gainNode) gainNode.gain.value = settings.boost;
+  function setBoost(v){
+    v = Math.min(10, Math.max(1, Math.round(v * 10) / 10));
+    settings.boost = v;
+    document.getElementById("boost-slider").value = v;
+    document.getElementById("boost-value").textContent = v.toFixed(1) + "×";
+    if(gainNode) gainNode.gain.value = v;
     clearActivePreset();
     saveSettings();
+  }
+  document.getElementById("boost-slider").addEventListener("input", function(e){
+    setBoost(Number(e.target.value));
+  });
+  document.getElementById("btn-vol-down").addEventListener("click", function(){
+    setBoost(Number(settings.boost) - 0.5);
+  });
+  document.getElementById("btn-vol-up").addEventListener("click", function(){
+    setBoost(Number(settings.boost) + 0.5);
   });
   document.getElementById("freq-slider").addEventListener("input", function(e){
     settings.freq = Number(e.target.value);
@@ -398,6 +425,39 @@
       btn.classList.add("active");
       saveSettings();
     });
+  });
+
+  /* ---------------- test sound ---------------- */
+  /* Soft two-tone chime through the headphones, honoring the ear balance.
+     Confirms output routing and comfortable volume before starting. */
+  document.getElementById("btn-test-sound").addEventListener("click", function(){
+    try{
+      var AC = window.AudioContext || window.webkitAudioContext;
+      var ctx = new AC();
+      var osc = ctx.createOscillator();
+      osc.type = "sine";
+      var g = ctx.createGain();
+      g.gain.value = 0;
+      var pan = ctx.createStereoPanner ? ctx.createStereoPanner() : null;
+      osc.connect(g);
+      if(pan){
+        pan.pan.value = Number(settings.balance || 0);
+        g.connect(pan); pan.connect(ctx.destination);
+      } else {
+        g.connect(ctx.destination);
+      }
+      var t = ctx.currentTime;
+      osc.frequency.setValueAtTime(660, t);
+      osc.frequency.setValueAtTime(880, t + 0.35);
+      g.gain.setValueAtTime(0, t);
+      g.gain.linearRampToValueAtTime(0.25, t + 0.05);
+      g.gain.setValueAtTime(0.25, t + 0.6);
+      g.gain.linearRampToValueAtTime(0, t + 0.85);
+      osc.start(t);
+      osc.stop(t + 0.9);
+      osc.onended = function(){ ctx.close().catch(function(){}); };
+      showToast("Playing test sound in your headphones");
+    }catch(e){}
   });
 
   /* ---------------- wake lock ---------------- */
@@ -442,6 +502,7 @@
 
   function openSetup(){
     document.getElementById("setup-boost").value = settings.boost;
+    document.getElementById("setup-balance").value = settings.balance || 0;
     document.getElementById("setup-theme").value = settings.theme;
     document.getElementById("setup-name").value = settings.emergencyName;
     document.getElementById("setup-phone").value = settings.emergencyPhone;
@@ -477,8 +538,15 @@
     setSwitch(this, this.dataset.on !== "1");
   });
 
+  // Balance applies live while adjusting so the caregiver hears the effect.
+  document.getElementById("setup-balance").addEventListener("input", function(e){
+    if(pannerNode) pannerNode.pan.value = Number(e.target.value);
+  });
+
   document.getElementById("btn-save-setup").addEventListener("click", function(){
     settings.boost = Number(document.getElementById("setup-boost").value);
+    settings.balance = Number(document.getElementById("setup-balance").value);
+    if(pannerNode) pannerNode.pan.value = settings.balance;
     settings.theme = document.getElementById("setup-theme").value;
     settings.emergencyName = document.getElementById("setup-name").value.trim();
     settings.emergencyPhone = document.getElementById("setup-phone").value.trim();
@@ -580,10 +648,8 @@
     var show = settings.showEmergency !== false;
     var b1 = document.getElementById("btn-emergency");
     var b2 = document.getElementById("btn-emergency-lock");
-    var b3 = document.getElementById("btn-emergency-top");
     if(b1) b1.style.display = show ? "flex" : "none";
     if(b2) b2.style.display = show ? "flex" : "none";
-    if(b3) b3.style.display = show ? "flex" : "none";
   }
   function emergencyCall(){
     if(!settings.emergencyPhone){
@@ -594,16 +660,30 @@
   }
   var emBtn = document.getElementById("btn-emergency");
   var emBtnLock = document.getElementById("btn-emergency-lock");
-  var emBtnTop = document.getElementById("btn-emergency-top");
   if(emBtn) emBtn.addEventListener("click", emergencyCall);
   if(emBtnLock) emBtnLock.addEventListener("click", emergencyCall);
-  if(emBtnTop) emBtnTop.addEventListener("click", emergencyCall);
 
-  /* ---------------- service worker (offline app shell) ---------------- */
+  /* ---------------- service worker (offline app shell + update banner) ---------------- */
   if("serviceWorker" in navigator){
     window.addEventListener("load", function(){
-      navigator.serviceWorker.register("sw.js").catch(function(e){ /* app still works without offline cache */ });
+      navigator.serviceWorker.register("sw.js").then(function(reg){
+        // When a new version finishes installing, offer a one-tap refresh
+        // instead of relying on cache timing and double reopens.
+        function watchInstalling(worker){
+          if(!worker) return;
+          worker.addEventListener("statechange", function(){
+            if(worker.state === "installed" && navigator.serviceWorker.controller){
+              var b = document.getElementById("update-banner");
+              if(b) b.style.display = "block";
+            }
+          });
+        }
+        watchInstalling(reg.installing);
+        reg.addEventListener("updatefound", function(){ watchInstalling(reg.installing); });
+      }).catch(function(e){ /* app still works without offline cache */ });
     });
+    var updateBanner = document.getElementById("update-banner");
+    if(updateBanner) updateBanner.addEventListener("click", function(){ location.reload(); });
   }
 
 })();
