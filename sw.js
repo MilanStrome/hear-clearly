@@ -2,7 +2,7 @@
    Cache-first app shell so the app opens with zero internet connection,
    even from a cold start. Bump CACHE_VERSION when shipping updated files. */
 
-var CACHE_VERSION = "hear-clearly-v4";
+var CACHE_VERSION = "hear-clearly-v5";
 var SHELL_FILES = [
   "./",
   "index.html",
@@ -18,7 +18,12 @@ var SHELL_FILES = [
 self.addEventListener("install", function(event){
   event.waitUntil(
     caches.open(CACHE_VERSION).then(function(cache){
-      return cache.addAll(SHELL_FILES);
+      // "no-cache" bypasses stale HTTP/CDN copies (e.g. GitHub Pages' ~10 min
+      // cache) so the precached shell is a fresh, mutually consistent set —
+      // never a mix of old and new files.
+      return cache.addAll(SHELL_FILES.map(function(url){
+        return new Request(url, {cache: "no-cache"});
+      }));
     }).then(function(){
       return self.skipWaiting();
     })

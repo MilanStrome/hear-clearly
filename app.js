@@ -1,6 +1,9 @@
 (function(){
   "use strict";
 
+  var APP_VERSION = 5; // keep in step with CACHE_VERSION in sw.js
+  console.log("Hear Clearly app.js version " + APP_VERSION);
+
   /* ---------------- state & storage ---------------- */
   var DEFAULT_SETTINGS = {
     boost: 2, captionSize: 2, theme: "auto", advanced: false,
@@ -105,7 +108,8 @@
     startCaptions();
     requestWakeLock();
     beginSession();
-    document.getElementById("btn-lock").style.display = "flex";
+    var lb = document.getElementById("btn-lock");
+    if(lb) lb.style.display = "flex";
   }
 
   function stopListening(){
@@ -119,7 +123,8 @@
     stopCaptions();
     releaseWakeLock();
     hideMicWarning();
-    document.getElementById("btn-lock").style.display = "none";
+    var lb = document.getElementById("btn-lock");
+    if(lb) lb.style.display = "none";
     unlockScreen(); // never leave the lock up when listening has ended
     if(micStream){ micStream.getTracks().forEach(function(t){ t.stop(); }); micStream = null; }
     if(audioCtx){ audioCtx.close().catch(function(){}); audioCtx = null; }
@@ -556,13 +561,15 @@
   document.getElementById("btn-back-from-setup").addEventListener("click", function(){ showView("home"); });
 
   function setSwitch(el, on){
+    if(!el) return;
     el.classList.toggle("on", !!on);
     el.dataset.on = on ? "1" : "0";
   }
   document.getElementById("setup-advanced-switch").addEventListener("click", function(){
     setSwitch(this, this.dataset.on !== "1");
   });
-  document.getElementById("setup-emergency-switch").addEventListener("click", function(){
+  var emSwitch = document.getElementById("setup-emergency-switch");
+  if(emSwitch) emSwitch.addEventListener("click", function(){
     setSwitch(this, this.dataset.on !== "1");
   });
 
@@ -573,7 +580,8 @@
     settings.emergencyName = document.getElementById("setup-name").value.trim();
     settings.emergencyPhone = document.getElementById("setup-phone").value.trim();
     settings.advanced = document.getElementById("setup-advanced-switch").dataset.on === "1";
-    settings.showEmergency = document.getElementById("setup-emergency-switch").dataset.on === "1";
+    var emSw = document.getElementById("setup-emergency-switch");
+    if(emSw) settings.showEmergency = emSw.dataset.on === "1";
     saveSettings();
     applyTheme();
     currentSettingsIntoUI();
@@ -608,14 +616,21 @@
     lc.scrollTop = lc.scrollHeight;
   }
 
+  // Elements may be absent if an older index.html is being served alongside
+  // this script (stale cache) — the lock feature then simply stays off.
+  var lockBtn = document.getElementById("btn-lock");
+  var lockOverlayEl = document.getElementById("lock-overlay");
+  var unlockBtn = document.getElementById("btn-unlock");
+  var lockSupported = !!(lockBtn && lockOverlayEl && unlockBtn);
+
   function lockScreen(){
-    if(isLocked) return;
+    if(!lockSupported || isLocked) return;
     isLocked = true;
     mirrorCaptionsToLock();
     lockObserver = new MutationObserver(mirrorCaptionsToLock);
     lockObserver.observe(document.getElementById("caption-box"),
       {childList:true, subtree:true, characterData:true, attributes:true});
-    document.getElementById("lock-overlay").classList.add("show");
+    lockOverlayEl.classList.add("show");
   }
 
   function unlockScreen(){
@@ -623,15 +638,14 @@
     isLocked = false;
     if(lockObserver){ lockObserver.disconnect(); lockObserver = null; }
     cancelUnlockHold(true);
-    document.getElementById("lock-overlay").classList.remove("show");
-    document.getElementById("lock-hint").classList.remove("show");
+    lockOverlayEl.classList.remove("show");
+    var hint = document.getElementById("lock-hint");
+    if(hint) hint.classList.remove("show");
   }
 
-  document.getElementById("btn-lock").addEventListener("click", lockScreen);
-
-  var unlockBtn = document.getElementById("btn-unlock");
   function showLockHint(){
     var hint = document.getElementById("lock-hint");
+    if(!hint) return;
     hint.classList.add("show");
     if(lockHintTimer) clearTimeout(lockHintTimer);
     lockHintTimer = setTimeout(function(){ hint.classList.remove("show"); }, 1600);
@@ -649,32 +663,39 @@
       unlockBtn.querySelector(".fill").style.transitionDuration = "0ms";
     }
   }
-  unlockBtn.addEventListener("pointerdown", startUnlockHold);
-  unlockBtn.addEventListener("pointerup", function(){
-    // Released too early — still locked, so remind them how it works.
-    if(unlockTimer) showLockHint();
-    cancelUnlockHold(true);
-  });
-  unlockBtn.addEventListener("pointercancel", function(){ cancelUnlockHold(true); });
-  unlockBtn.addEventListener("pointerleave", function(){ cancelUnlockHold(true); });
-  unlockBtn.addEventListener("contextmenu", function(e){ e.preventDefault(); });
+  if(lockSupported){
+    lockBtn.addEventListener("click", lockScreen);
+    unlockBtn.addEventListener("pointerdown", startUnlockHold);
+    unlockBtn.addEventListener("pointerup", function(){
+      // Released too early — still locked, so remind them how it works.
+      if(unlockTimer) showLockHint();
+      cancelUnlockHold(true);
+    });
+    unlockBtn.addEventListener("pointercancel", function(){ cancelUnlockHold(true); });
+    unlockBtn.addEventListener("pointerleave", function(){ cancelUnlockHold(true); });
+    unlockBtn.addEventListener("contextmenu", function(e){ e.preventDefault(); });
 
-  // A stray tap anywhere on the lock screen just shows the how-to-unlock hint.
-  document.getElementById("lock-overlay").addEventListener("click", function(e){
-    if(e.target.closest("#btn-unlock") || e.target.closest("#btn-emergency-lock")) return;
-    showLockHint();
-  });
+    // A stray tap anywhere on the lock screen just shows the how-to-unlock hint.
+    lockOverlayEl.addEventListener("click", function(e){
+      if(e.target.closest("#btn-unlock") || e.target.closest("#btn-emergency-lock")) return;
+      showLockHint();
+    });
+  }
 
   /* ---------------- emergency ---------------- */
   function updateEmergencyLabel(){
     var name = settings.emergencyName ? settings.emergencyName : "for help";
-    document.getElementById("emergency-name-label").textContent = name;
-    document.getElementById("emergency-name-label-lock").textContent = name;
+    var l1 = document.getElementById("emergency-name-label");
+    var l2 = document.getElementById("emergency-name-label-lock");
+    if(l1) l1.textContent = name;
+    if(l2) l2.textContent = name;
   }
   function applyEmergencyVisibility(){
     var show = settings.showEmergency !== false;
-    document.getElementById("btn-emergency").style.display = show ? "flex" : "none";
-    document.getElementById("btn-emergency-lock").style.display = show ? "flex" : "none";
+    var b1 = document.getElementById("btn-emergency");
+    var b2 = document.getElementById("btn-emergency-lock");
+    if(b1) b1.style.display = show ? "flex" : "none";
+    if(b2) b2.style.display = show ? "flex" : "none";
   }
   function emergencyCall(){
     if(!settings.emergencyPhone){
@@ -683,8 +704,10 @@
     }
     window.location.href = "tel:" + settings.emergencyPhone.replace(/[^+\d]/g,"");
   }
-  document.getElementById("btn-emergency").addEventListener("click", emergencyCall);
-  document.getElementById("btn-emergency-lock").addEventListener("click", emergencyCall);
+  var emBtn = document.getElementById("btn-emergency");
+  var emBtnLock = document.getElementById("btn-emergency-lock");
+  if(emBtn) emBtn.addEventListener("click", emergencyCall);
+  if(emBtnLock) emBtnLock.addEventListener("click", emergencyCall);
 
   /* ---------------- service worker (offline app shell) ---------------- */
   if("serviceWorker" in navigator){
