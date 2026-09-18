@@ -104,7 +104,7 @@ p{margin:0;}
 
 .stage{display:flex;flex-direction:column;align-items:center;gap:18px;padding:10px 0 4px;}
 .listen-wrap{position:relative;width:220px;height:220px;display:flex;align-items:center;justify-content:center;}
-.ring{position:absolute;border-radius:50%;border:2px solid var(--primary);opacity:0;}
+.ring{position:absolute;border-radius:50%;border:2px solid var(--primary);opacity:0;pointer-events:none;}
 .listening .ring{animation:pulse 2.2s ease-out infinite;}
 .ring.r1{width:220px;height:220px;animation-delay:0s;}
 .ring.r2{width:220px;height:220px;animation-delay:0.7s;}
