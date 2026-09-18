@@ -1,7 +1,7 @@
 (function(){
   "use strict";
 
-  var APP_VERSION = 5; // keep in step with CACHE_VERSION in sw.js
+  var APP_VERSION = "5.1"; // keep in step with CACHE_VERSION in sw.js
   console.log("Hear Clearly app.js version " + APP_VERSION);
 
   /* ---------------- state & storage ---------------- */
@@ -98,6 +98,7 @@
     filterNode.connect(audioCtx.destination);
 
     isListening = true;
+    showToast("Listening — speak normally");
     document.getElementById("stage").classList.add("listening");
     document.getElementById("listen-icon").textContent = "⏸️";
     document.getElementById("listen-label").textContent = "Stop";
@@ -132,7 +133,13 @@
   }
 
   document.getElementById("btn-listen").addEventListener("click", function(){
-    if(isListening) stopListening(); else startListening();
+    if(isListening){
+      stopListening();
+      showToast("Stopped");
+    } else {
+      showToast("Starting — allow the microphone if asked");
+      startListening();
+    }
   });
 
   function startNoiseMeter(){
@@ -590,11 +597,13 @@
     showView("home");
   });
 
+  var toastTimer = null;
   function showToast(msg){
     var t = document.getElementById("save-toast");
     t.textContent = msg;
     t.classList.add("show");
-    setTimeout(function(){ t.classList.remove("show"); }, 1800);
+    if(toastTimer) clearTimeout(toastTimer);
+    toastTimer = setTimeout(function(){ t.classList.remove("show"); }, 1800);
   }
 
   /* ---------------- screen lock ---------------- */
