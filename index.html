@@ -33,6 +33,7 @@
     <div class="topbar">
       <div class="brand"><div class="brand-mark">🦻</div><div class="brand-name">Hear Clearly</div></div>
       <div class="row-gap-10">
+        <button class="gear-btn call-btn" id="btn-emergency-top" aria-label="Call for help" title="Call for help">☎️</button>
         <button class="gear-btn" id="btn-gear" aria-label="Hold to open setup" title="Hold to open setup">
           <span class="fill"></span><span class="icon">⚙️</span>
         </button>
@@ -64,7 +65,7 @@
     <div class="stack-gap" id="simple-controls">
       <div class="slider-row">
         <div class="slider-label"><span>Volume boost</span><span id="boost-value">2.0×</span></div>
-        <input type="range" id="boost-slider" min="1" max="5" step="0.1" value="2">
+        <input type="range" id="boost-slider" min="1" max="8" step="0.1" value="2">
       </div>
       <div class="presets-row" id="presets-row">
         <button class="preset-btn" data-preset="quiet"><span class="emoji">🛋️</span>Quiet room</button>
@@ -98,7 +99,8 @@
     <div class="stack-gap">
       <div class="field-group">
         <label class="field-label" for="setup-boost">Default volume boost</label>
-        <input type="range" id="setup-boost" min="1" max="5" step="0.1" value="2">
+        <input type="range" id="setup-boost" min="1" max="8" step="0.1" value="2">
+        <div style="font-size:14px;color:var(--muted);">High boost can be very loud — choose a comfortable level.</div>
       </div>
       <div class="field-group">
         <label class="field-label" for="setup-theme">App appearance</label>
@@ -132,7 +134,7 @@
       </div>
       <div class="privacy-note">🔒 Sound from the microphone is processed only on this phone. Nothing is ever sent over the internet — the app works fully offline.</div>
       <button class="btn btn-primary" id="btn-save-setup">Save settings</button>
-      <p style="text-align:center;color:var(--muted);font-size:14px;">App version 6.0</p>
+      <p style="text-align:center;color:var(--muted);font-size:14px;">App version 6.1</p>
     </div>
   </div>
 

@@ -1,7 +1,7 @@
 (function(){
   "use strict";
 
-  var APP_VERSION = "6.0"; // keep in step with CACHE_VERSION in sw.js
+  var APP_VERSION = "6.1"; // keep in step with CACHE_VERSION in sw.js
   console.log("Hear Clearly app.js version " + APP_VERSION);
 
   /* ---------------- state & storage ---------------- */
@@ -47,8 +47,44 @@
 
   /* ---------------- audio engine ---------------- */
   var audioCtx = null, micStream = null, sourceNode = null, gainNode = null, filterNode = null, analyserNode = null, compressorNode = null;
+  var hpfNode = null, gateNode = null, gateAnalyser = null;
   var isListening = false;
   var noiseRAF = null;
+
+  /* Noise gate: ducks the output ~85% when the (pre-boost) level sits at the
+     mic's hiss floor — quiet between sentences — and reopens the instant
+     speech starts. Fast open so word starts aren't clipped, slow close so it
+     doesn't flutter, and it ducks rather than hard-mutes. */
+  var GATE_OPEN_RMS = 0.012, GATE_CLOSE_RMS = 0.006, GATE_CLOSE_HOLD_MS = 400, GATE_FLOOR = 0.15;
+  var gateTimer = null, gateOpen = true, gateBelowSince = 0;
+
+  function startNoiseGate(){
+    var data = new Float32Array(gateAnalyser.fftSize);
+    gateOpen = true; gateBelowSince = 0;
+    gateTimer = setInterval(function(){
+      if(!isListening || !gateAnalyser || !gateNode || !audioCtx) return;
+      gateAnalyser.getFloatTimeDomainData(data);
+      var sum = 0;
+      for(var i=0;i<data.length;i++) sum += data[i]*data[i];
+      var rms = Math.sqrt(sum/data.length);
+      var now = Date.now();
+      if(rms >= GATE_OPEN_RMS){
+        gateBelowSince = 0;
+        if(!gateOpen){
+          gateOpen = true;
+          gateNode.gain.setTargetAtTime(1, audioCtx.currentTime, 0.01);
+        }
+      } else if(rms < GATE_CLOSE_RMS){
+        if(!gateBelowSince) gateBelowSince = now;
+        if(gateOpen && (now - gateBelowSince) >= GATE_CLOSE_HOLD_MS){
+          gateOpen = false;
+          gateNode.gain.setTargetAtTime(GATE_FLOOR, audioCtx.currentTime, 0.15);
+        }
+      }
+      /* between the two thresholds: hysteresis — hold the current state */
+    }, 50);
+  }
+  function stopNoiseGate(){ if(gateTimer){ clearInterval(gateTimer); gateTimer = null; } }
 
   // These are the settings that reliably produce audible output on Android;
   // disabling echoCancellation made several devices go fully silent (Chrome
@@ -101,6 +137,19 @@
     if(audioCtx.state === "suspended"){ try{ await audioCtx.resume(); }catch(e){} }
 
     sourceNode = audioCtx.createMediaStreamSource(micStream);
+
+    // Rumble filter: cuts hum, AC rumble and handling noise below speech.
+    hpfNode = audioCtx.createBiquadFilter();
+    hpfNode.type = "highpass";
+    hpfNode.frequency.value = 120;
+
+    // Pre-boost level tap for the noise gate (independent of the boost slider).
+    gateAnalyser = audioCtx.createAnalyser();
+    gateAnalyser.fftSize = 256;
+
+    gateNode = audioCtx.createGain();
+    gateNode.gain.value = 1;
+
     gainNode = audioCtx.createGain();
     gainNode.gain.value = Number(settings.boost);
 
@@ -122,11 +171,15 @@
     compressorNode.attack.value = 0.003;
     compressorNode.release.value = 0.25;
 
-    sourceNode.connect(gainNode);
+    sourceNode.connect(hpfNode);
+    hpfNode.connect(gateAnalyser);
+    hpfNode.connect(gainNode);
     gainNode.connect(filterNode);
     filterNode.connect(analyserNode);
-    filterNode.connect(compressorNode);
+    filterNode.connect(gateNode);
+    gateNode.connect(compressorNode);
     compressorNode.connect(audioCtx.destination);
+    startNoiseGate();
 
     isListening = true;
     showToast("Listening — speak normally");
@@ -178,7 +231,7 @@
       micStream = basic;
       attachKeepAlive(micStream);
       sourceNode = audioCtx.createMediaStreamSource(micStream);
-      sourceNode.connect(gainNode);
+      sourceNode.connect(hpfNode);
       showToast("Microphone adjusted");
     }catch(e){ /* keep whatever we have */ }
   }
@@ -191,6 +244,7 @@
     document.getElementById("status-dot").classList.remove("on");
     document.getElementById("status-text").textContent = "Not listening";
     stopNoiseMeter();
+    stopNoiseGate();
     releaseWakeLock();
     hideMicWarning();
     if(silenceCheckTimer){ clearTimeout(silenceCheckTimer); silenceCheckTimer = null; }
@@ -200,7 +254,7 @@
     releaseKeepAlive();
     if(micStream){ micStream.getTracks().forEach(function(t){ t.stop(); }); micStream = null; }
     if(audioCtx){ audioCtx.close().catch(function(){}); audioCtx = null; }
-    compressorNode = null;
+    compressorNode = null; hpfNode = null; gateNode = null; gateAnalyser = null;
     document.getElementById("noise-fill").style.width = "0%";
   }
 
@@ -526,8 +580,10 @@
     var show = settings.showEmergency !== false;
     var b1 = document.getElementById("btn-emergency");
     var b2 = document.getElementById("btn-emergency-lock");
+    var b3 = document.getElementById("btn-emergency-top");
     if(b1) b1.style.display = show ? "flex" : "none";
     if(b2) b2.style.display = show ? "flex" : "none";
+    if(b3) b3.style.display = show ? "flex" : "none";
   }
   function emergencyCall(){
     if(!settings.emergencyPhone){
@@ -538,8 +594,10 @@
   }
   var emBtn = document.getElementById("btn-emergency");
   var emBtnLock = document.getElementById("btn-emergency-lock");
+  var emBtnTop = document.getElementById("btn-emergency-top");
   if(emBtn) emBtn.addEventListener("click", emergencyCall);
   if(emBtnLock) emBtnLock.addEventListener("click", emergencyCall);
+  if(emBtnTop) emBtnTop.addEventListener("click", emergencyCall);
 
   /* ---------------- service worker (offline app shell) ---------------- */
   if("serviceWorker" in navigator){
