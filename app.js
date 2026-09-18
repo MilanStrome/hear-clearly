@@ -1,14 +1,14 @@
 (function(){
   "use strict";
 
-  var APP_VERSION = "6.2"; // keep in step with CACHE_VERSION in sw.js
+  var APP_VERSION = "6.3"; // keep in step with CACHE_VERSION in sw.js
   console.log("Hear Clearly app.js version " + APP_VERSION);
 
   /* ---------------- state & storage ---------------- */
   var DEFAULT_SETTINGS = {
     boost: 2, theme: "auto", advanced: false,
     emergencyName: "", emergencyPhone: "", showEmergency: true,
-    balance: 0,
+    balance: 0, loudMode: false,
     freq: 2500, boostDb: 9
   };
   var settings = loadJSON("ha_settings", DEFAULT_SETTINGS);
@@ -48,7 +48,34 @@
 
   /* ---------------- audio engine ---------------- */
   var audioCtx = null, micStream = null, sourceNode = null, gainNode = null, filterNode = null, analyserNode = null, compressorNode = null;
-  var hpfNode = null, gateNode = null, gateAnalyser = null, makeupNode = null, pannerNode = null;
+  var hpfNode = null, gateNode = null, gateAnalyser = null, makeupNode = null, pannerNode = null, clipperNode = null;
+
+  /* "Extra loud mode": hearing-aid style loudness maximizing — the limiter
+     bites earlier and the makeup stage pushes peaks near full scale. The
+     soft clipper (always in the chain) rounds off anything that would
+     exceed the ceiling, so neither mode can crackle. */
+  function loudParams(){
+    return settings.loudMode
+      ? {threshold: -20, makeup: 4.0, gateFloor: 0.08}
+      : {threshold: -12, makeup: 2.0, gateFloor: 0.15};
+  }
+  function applyLoudMode(){
+    var p = loudParams();
+    if(compressorNode) compressorNode.threshold.value = p.threshold;
+    if(makeupNode) makeupNode.gain.value = p.makeup;
+    if(gateNode && !gateOpen && audioCtx){
+      gateNode.gain.setTargetAtTime(p.gateFloor, audioCtx.currentTime, 0.15);
+    }
+  }
+  function makeSoftClipCurve(){
+    var n = 1024, curve = new Float32Array(n);
+    var k = 1.5, norm = Math.tanh(k);
+    for(var i=0;i<n;i++){
+      var x = (i / (n - 1)) * 2 - 1;
+      curve[i] = Math.tanh(k * x) / norm;
+    }
+    return curve;
+  }
   var isListening = false;
   var noiseRAF = null;
 
@@ -56,7 +83,7 @@
      mic's hiss floor — quiet between sentences — and reopens the instant
      speech starts. Fast open so word starts aren't clipped, slow close so it
      doesn't flutter, and it ducks rather than hard-mutes. */
-  var GATE_OPEN_RMS = 0.012, GATE_CLOSE_RMS = 0.006, GATE_CLOSE_HOLD_MS = 400, GATE_FLOOR = 0.15;
+  var GATE_OPEN_RMS = 0.012, GATE_CLOSE_RMS = 0.006, GATE_CLOSE_HOLD_MS = 400;
   var gateTimer = null, gateOpen = true, gateBelowSince = 0;
 
   function startNoiseGate(){
@@ -79,7 +106,7 @@
         if(!gateBelowSince) gateBelowSince = now;
         if(gateOpen && (now - gateBelowSince) >= GATE_CLOSE_HOLD_MS){
           gateOpen = false;
-          gateNode.gain.setTargetAtTime(GATE_FLOOR, audioCtx.currentTime, 0.15);
+          gateNode.gain.setTargetAtTime(loudParams().gateFloor, audioCtx.currentTime, 0.15);
         }
       }
       /* between the two thresholds: hysteresis — hold the current state */
@@ -165,17 +192,24 @@
 
     // Limiter: stops loud speech from clipping into harsh distortion
     // now that the gain and EQ boost can push peaks past full scale.
+    var loud = loudParams();
     compressorNode = audioCtx.createDynamicsCompressor();
-    compressorNode.threshold.value = -12;
+    compressorNode.threshold.value = loud.threshold;
     compressorNode.knee.value = 12;
     compressorNode.ratio.value = 12;
     compressorNode.attack.value = 0.003;
     compressorNode.release.value = 0.25;
 
-    // Makeup gain: the limiter smooths peaks well below full scale, so a
-    // fixed +6dB stage after it restores overall loudness — loud but clean.
+    // Makeup gain: the limiter smooths peaks well below full scale, so this
+    // stage after it restores overall loudness — loud but clean.
     makeupNode = audioCtx.createGain();
-    makeupNode.gain.value = 2.0;
+    makeupNode.gain.value = loud.makeup;
+
+    // Soft clipper: rounds off any peak that would exceed the ceiling.
+    // Transparent at normal levels; engages when Extra loud mode pushes hard.
+    clipperNode = audioCtx.createWaveShaper();
+    clipperNode.curve = makeSoftClipCurve();
+    clipperNode.oversample = "4x";
 
     // Ear balance: shifts output toward the ear that hears less well.
     pannerNode = audioCtx.createStereoPanner ? audioCtx.createStereoPanner() : null;
@@ -189,11 +223,12 @@
     filterNode.connect(gateNode);
     gateNode.connect(compressorNode);
     compressorNode.connect(makeupNode);
+    makeupNode.connect(clipperNode);
     if(pannerNode){
-      makeupNode.connect(pannerNode);
+      clipperNode.connect(pannerNode);
       pannerNode.connect(audioCtx.destination);
     } else {
-      makeupNode.connect(audioCtx.destination);
+      clipperNode.connect(audioCtx.destination);
     }
     startNoiseGate();
 
@@ -270,7 +305,7 @@
     releaseKeepAlive();
     if(micStream){ micStream.getTracks().forEach(function(t){ t.stop(); }); micStream = null; }
     if(audioCtx){ audioCtx.close().catch(function(){}); audioCtx = null; }
-    compressorNode = null; hpfNode = null; gateNode = null; gateAnalyser = null; makeupNode = null; pannerNode = null;
+    compressorNode = null; hpfNode = null; gateNode = null; gateAnalyser = null; makeupNode = null; pannerNode = null; clipperNode = null;
     document.getElementById("noise-fill").style.width = "0%";
   }
 
@@ -508,6 +543,7 @@
     document.getElementById("setup-phone").value = settings.emergencyPhone;
     setSwitch(document.getElementById("setup-advanced-switch"), settings.advanced);
     setSwitch(document.getElementById("setup-emergency-switch"), settings.showEmergency !== false);
+    setSwitch(document.getElementById("setup-loud-switch"), settings.loudMode === true);
     showView("setup");
   }
 
@@ -537,6 +573,13 @@
   if(emSwitch) emSwitch.addEventListener("click", function(){
     setSwitch(this, this.dataset.on !== "1");
   });
+  var loudSwitch = document.getElementById("setup-loud-switch");
+  if(loudSwitch) loudSwitch.addEventListener("click", function(){
+    setSwitch(this, this.dataset.on !== "1");
+    // apply live so the caregiver can A/B compare mid-session
+    settings.loudMode = this.dataset.on === "1";
+    applyLoudMode();
+  });
 
   // Balance applies live while adjusting so the caregiver hears the effect.
   document.getElementById("setup-balance").addEventListener("input", function(e){
@@ -553,6 +596,9 @@
     settings.advanced = document.getElementById("setup-advanced-switch").dataset.on === "1";
     var emSw = document.getElementById("setup-emergency-switch");
     if(emSw) settings.showEmergency = emSw.dataset.on === "1";
+    var loudSw = document.getElementById("setup-loud-switch");
+    if(loudSw) settings.loudMode = loudSw.dataset.on === "1";
+    applyLoudMode();
     saveSettings();
     applyTheme();
     currentSettingsIntoUI();
