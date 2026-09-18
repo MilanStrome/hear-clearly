@@ -2,7 +2,7 @@
    Cache-first app shell so the app opens with zero internet connection,
    even from a cold start. Bump CACHE_VERSION when shipping updated files. */
 
-var CACHE_VERSION = "hear-clearly-v1";
+var CACHE_VERSION = "hear-clearly-v3";
 var SHELL_FILES = [
   "./",
   "index.html",

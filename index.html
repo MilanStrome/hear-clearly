@@ -59,6 +59,7 @@
       </div>
       <div class="noise-meter"><div class="noise-fill" id="noise-fill"></div></div>
       <div class="headphone-note" id="headphone-note">🎧 Make sure your headphones are connected</div>
+      <div class="mic-warning" id="mic-warning" style="display:none;">⚠️ Using the Bluetooth headset's microphone — sound quality and delay may be worse. Try wired headphones for the microphone side if this happens often.</div>
     </div>
 
     <div class="caption-box" id="caption-box">
@@ -67,6 +68,7 @@
     <div class="caption-tools">
       <button class="tool-btn" id="btn-repeat">🔁 Repeat last</button>
       <button class="tool-btn" id="btn-caption-size">🔠 Text size</button>
+      <button class="tool-btn" id="btn-lock" style="display:none;">🔒 Lock</button>
     </div>
 
     <div class="stack-gap" id="simple-controls">
@@ -156,6 +158,13 @@
       </div>
       <div class="mode-toggle">
         <div>
+          <div class="field-label">Show emergency call button</div>
+          <div style="font-size:14px;color:var(--muted);">Large "Call" button on the main screen</div>
+        </div>
+        <div class="switch on" id="setup-emergency-switch" data-on="1"><div class="knob"></div></div>
+      </div>
+      <div class="mode-toggle">
+        <div>
           <div class="field-label">Advanced mode</div>
           <div style="font-size:14px;color:var(--muted);">Show manual sound-tuning controls</div>
         </div>
@@ -169,6 +178,18 @@
 </div>
 
 <div class="repeat-overlay" id="repeat-overlay"></div>
+
+<!-- SCREEN LOCK -->
+<div class="lock-overlay" id="lock-overlay">
+  <div class="lock-inner">
+    <div class="status-row"><div class="status-dot on"></div><span>Listening — screen is locked</span></div>
+    <div class="lock-captions" id="lock-captions"></div>
+    <div class="lock-hint" id="lock-hint">Hold the button below to unlock</div>
+    <button class="unlock-btn" id="btn-unlock"><span class="fill"></span><span class="label">🔓 Hold to unlock</span></button>
+    <button class="emergency-btn" id="btn-emergency-lock">☎️ Call <span id="emergency-name-label-lock">for help</span></button>
+  </div>
+</div>
+
 <div class="save-toast" id="save-toast">Saved</div>
 
 </body>

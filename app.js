@@ -4,7 +4,7 @@
   /* ---------------- state & storage ---------------- */
   var DEFAULT_SETTINGS = {
     boost: 2, captionSize: 2, theme: "auto", advanced: false,
-    emergencyName: "", emergencyPhone: "",
+    emergencyName: "", emergencyPhone: "", showEmergency: true,
     freq: 2500, boostDb: 9
   };
   var settings = loadJSON("ha_settings", DEFAULT_SETTINGS);
@@ -60,6 +60,7 @@
     document.getElementById("simple-controls").style.display = "flex";
     applyCaptionSizeToDOM();
     updateEmergencyLabel();
+    applyEmergencyVisibility();
   }
   currentSettingsIntoUI();
 
@@ -70,6 +71,7 @@
       alert("This app needs microphone access to work. Please allow microphone access and try again.");
       return;
     }
+    micStream = await preferBuiltInMic(micStream);
     var AC = window.AudioContext || window.webkitAudioContext;
     audioCtx = new AC();
     if(audioCtx.state === "suspended"){ try{ await audioCtx.resume(); }catch(e){} }
@@ -103,6 +105,7 @@
     startCaptions();
     requestWakeLock();
     beginSession();
+    document.getElementById("btn-lock").style.display = "flex";
   }
 
   function stopListening(){
@@ -115,6 +118,9 @@
     stopNoiseMeter();
     stopCaptions();
     releaseWakeLock();
+    hideMicWarning();
+    document.getElementById("btn-lock").style.display = "none";
+    unlockScreen(); // never leave the lock up when listening has ended
     if(micStream){ micStream.getTracks().forEach(function(t){ t.stop(); }); micStream = null; }
     if(audioCtx){ audioCtx.close().catch(function(){}); audioCtx = null; }
     document.getElementById("noise-fill").style.width = "0%";
@@ -156,6 +162,61 @@
         note.classList.remove("ok");
       }
     }catch(e){ /* leave default hint */ }
+  }
+
+  /* ---------------- microphone routing (Bluetooth mitigation) ---------------- */
+  /* Android/Chrome can auto-route the mic through a connected Bluetooth headset
+     (phone-call style HFP/SCO), which is lower quality and higher latency.
+     Output routing to the headphones is unaffected — this only concerns input. */
+  var BT_MIC_RE = /bluetooth|hands-?free|headset|hfp|sco|airpods?|earbud|buds|wireless/i;
+
+  function isBluetoothMicLabel(label){
+    return BT_MIC_RE.test(label || "");
+  }
+  function activeMicTrack(stream){
+    return (stream && stream.getAudioTracks()[0]) || null;
+  }
+
+  async function preferBuiltInMic(stream){
+    hideMicWarning();
+    try{
+      var track = activeMicTrack(stream);
+      if(!track || !isBluetoothMicLabel(track.label)) return stream;
+
+      // OS picked a Bluetooth/headset mic — try to switch to a built-in one.
+      var devices = await navigator.mediaDevices.enumerateDevices();
+      var builtIn = devices.find(function(d){
+        return d.kind === "audioinput" &&
+               d.deviceId && d.deviceId !== "default" && d.deviceId !== "communications" &&
+               !isBluetoothMicLabel(d.label);
+      });
+      if(builtIn){
+        try{
+          var better = await navigator.mediaDevices.getUserMedia({
+            audio:{deviceId:{exact: builtIn.deviceId}, echoCancellation:true, noiseSuppression:true}
+          });
+          stream.getTracks().forEach(function(t){ t.stop(); });
+          stream = better;
+        }catch(e){ /* keep the original stream */ }
+      }
+
+      // Labels aren't reliable on every Android build — if a Bluetooth mic is
+      // still (or possibly) active, tell the user in plain language.
+      var finalTrack = activeMicTrack(stream);
+      if(finalTrack && isBluetoothMicLabel(finalTrack.label)){
+        showMicWarning();
+      }
+    }catch(e){ /* best effort — never block listening over this */ }
+    return stream;
+  }
+
+  function showMicWarning(){
+    var el = document.getElementById("mic-warning");
+    if(el) el.style.display = "flex";
+  }
+  function hideMicWarning(){
+    var el = document.getElementById("mic-warning");
+    if(el) el.style.display = "none";
   }
 
   /* ---------------- sliders ---------------- */
@@ -484,6 +545,7 @@
     document.getElementById("setup-name").value = settings.emergencyName;
     document.getElementById("setup-phone").value = settings.emergencyPhone;
     setSwitch(document.getElementById("setup-advanced-switch"), settings.advanced);
+    setSwitch(document.getElementById("setup-emergency-switch"), settings.showEmergency !== false);
     showView("setup");
   }
   document.getElementById("btn-back-from-setup").addEventListener("click", function(){ showView("home"); });
@@ -495,6 +557,9 @@
   document.getElementById("setup-advanced-switch").addEventListener("click", function(){
     setSwitch(this, this.dataset.on !== "1");
   });
+  document.getElementById("setup-emergency-switch").addEventListener("click", function(){
+    setSwitch(this, this.dataset.on !== "1");
+  });
 
   document.getElementById("btn-save-setup").addEventListener("click", function(){
     settings.boost = Number(document.getElementById("setup-boost").value);
@@ -503,6 +568,7 @@
     settings.emergencyName = document.getElementById("setup-name").value.trim();
     settings.emergencyPhone = document.getElementById("setup-phone").value.trim();
     settings.advanced = document.getElementById("setup-advanced-switch").dataset.on === "1";
+    settings.showEmergency = document.getElementById("setup-emergency-switch").dataset.on === "1";
     saveSettings();
     applyTheme();
     currentSettingsIntoUI();
@@ -518,18 +584,91 @@
     setTimeout(function(){ t.classList.remove("show"); }, 1800);
   }
 
+  /* ---------------- screen lock ---------------- */
+  /* Blocks accidental taps while listening. Captions stay visible on the
+     lock screen; unlock is a deliberate press-and-hold (same gesture as the
+     setup gear). The emergency button stays usable while locked. */
+  var isLocked = false;
+  var lockObserver = null;
+  var unlockTimer = null;
+  var lockHintTimer = null;
+
+  function mirrorCaptionsToLock(){
+    var box = document.getElementById("caption-box");
+    var lc = document.getElementById("lock-captions");
+    var size = (box.className.match(/cap-size-\d/) || [""])[0];
+    lc.className = "lock-captions " + size;
+    lc.innerHTML = box.innerHTML;
+    lc.scrollTop = lc.scrollHeight;
+  }
+
+  function lockScreen(){
+    if(isLocked) return;
+    isLocked = true;
+    mirrorCaptionsToLock();
+    lockObserver = new MutationObserver(mirrorCaptionsToLock);
+    lockObserver.observe(document.getElementById("caption-box"),
+      {childList:true, subtree:true, characterData:true, attributes:true});
+    document.getElementById("lock-overlay").classList.add("show");
+  }
+
+  function unlockScreen(){
+    if(!isLocked) return;
+    isLocked = false;
+    if(lockObserver){ lockObserver.disconnect(); lockObserver = null; }
+    cancelUnlockHold(true);
+    document.getElementById("lock-overlay").classList.remove("show");
+    document.getElementById("lock-hint").classList.remove("show");
+  }
+
+  document.getElementById("btn-lock").addEventListener("click", lockScreen);
+
+  var unlockBtn = document.getElementById("btn-unlock");
+  function startUnlockHold(){
+    unlockBtn.classList.add("filling");
+    unlockBtn.querySelector(".fill").style.transitionDuration = HOLD_MS + "ms";
+    unlockTimer = setTimeout(function(){ unlockScreen(); }, HOLD_MS);
+  }
+  function cancelUnlockHold(reset){
+    if(unlockTimer){ clearTimeout(unlockTimer); unlockTimer = null; }
+    unlockBtn.classList.remove("filling");
+    if(reset !== false){
+      unlockBtn.querySelector(".fill").style.transitionDuration = "0ms";
+    }
+  }
+  unlockBtn.addEventListener("pointerdown", startUnlockHold);
+  unlockBtn.addEventListener("pointerup", function(){ cancelUnlockHold(true); });
+  unlockBtn.addEventListener("pointerleave", function(){ cancelUnlockHold(true); });
+
+  // A stray tap anywhere on the lock screen just shows the how-to-unlock hint.
+  document.getElementById("lock-overlay").addEventListener("click", function(e){
+    if(e.target.closest("#btn-unlock") || e.target.closest("#btn-emergency-lock")) return;
+    var hint = document.getElementById("lock-hint");
+    hint.classList.add("show");
+    if(lockHintTimer) clearTimeout(lockHintTimer);
+    lockHintTimer = setTimeout(function(){ hint.classList.remove("show"); }, 1600);
+  });
+
   /* ---------------- emergency ---------------- */
   function updateEmergencyLabel(){
-    var label = document.getElementById("emergency-name-label");
-    label.textContent = settings.emergencyName ? settings.emergencyName : "for help";
+    var name = settings.emergencyName ? settings.emergencyName : "for help";
+    document.getElementById("emergency-name-label").textContent = name;
+    document.getElementById("emergency-name-label-lock").textContent = name;
   }
-  document.getElementById("btn-emergency").addEventListener("click", function(){
+  function applyEmergencyVisibility(){
+    var show = settings.showEmergency !== false;
+    document.getElementById("btn-emergency").style.display = show ? "flex" : "none";
+    document.getElementById("btn-emergency-lock").style.display = show ? "flex" : "none";
+  }
+  function emergencyCall(){
     if(!settings.emergencyPhone){
       alert("No emergency contact is set up yet. Ask a family member to add one in Setup (hold the gear icon).");
       return;
     }
     window.location.href = "tel:" + settings.emergencyPhone.replace(/[^+\d]/g,"");
-  });
+  }
+  document.getElementById("btn-emergency").addEventListener("click", emergencyCall);
+  document.getElementById("btn-emergency-lock").addEventListener("click", emergencyCall);
 
   /* ---------------- service worker (offline app shell) ---------------- */
   if("serviceWorker" in navigator){
